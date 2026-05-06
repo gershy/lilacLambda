@@ -1,19 +1,35 @@
 import '@gershy/clearing';
 
-const { skip, inCls, getCls, getClsName } = clearing;
+const { skip, isCls, inCls, getCls, getClsName } = clearing;
 const count: typeof cl.count = cl.count;
 const toArr: typeof cl.toArr = cl.toArr;
 const has:   typeof cl.has   = cl.has;
 const mod:   typeof cl.mod   = cl.mod;
 const limn:  typeof cl.limn  = cl.limn;
 
-export const cmpAny = Symbol('@gershy/test/cmp/any');
+export const cmpAny  = Symbol('@gershy/test/cmp/any');
+export const cmpJson = Symbol('@gershy/test/cmp/json');
 
 export const equal = (v0: any, v1: any, path: (string | number)[] = []): { equal: true } | { equal: false, path: (string | number)[], [K: string]: any } => {
   
   if (v0 === v1)                      return { equal: true };
   if (v0 == null || v1 == null)       return { equal: false, path, reason: 'identity', v0, v1 };
-  if (v0 === cmpAny || v1 === cmpAny) return { equal: true };
+  
+  if (v1 === cmpAny) return { equal: true };
+  
+  // Process 2-tuples whose first item is `cmpJson`
+  if (v1[0] === cmpJson) {
+    
+    if (!isCls(v0, String)) return { equal: false, path, reason: 'nonstring', cls0: getCls(v0) };
+    
+    const parsed = (() => {
+      try         { return JSON.parse(v0); }
+      catch (err) { return { equal: false, path, reason: 'nonjson', v0 }; }
+    })();
+    
+    return equal(parsed, v1[1], [ ...path, '<json>' ]);
+    
+  }
   
   const cls0 = getCls(v0);
   const cls1 = getCls(v1);
