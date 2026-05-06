@@ -1,11 +1,9 @@
 {
   "name": "@gershy/lilac-lambda",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "author": "Gershom Maes",
-  "description": "TODO",
-  "keywords": [
-    "TODO"
-  ],
+  "description": "Lilac lambda function",
+  "keywords": [],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/gershy/lilacLambda.git"
