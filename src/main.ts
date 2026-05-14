@@ -13,9 +13,7 @@ import type { Codec }                                 from '@gershy/util-codec-p
 import * as aws                                       from './util/aws.ts';
 import * as tf                                        from './util/terraform.ts';
 
-type Role = Flower; // TODO: Solidify permissions?? Best practices - secrets, etc.
-
-type LambdaShape = {
+export type LambdaShape = {
   
   // Represents the raw provider Lambda typing, with req+res and any additional context
   
@@ -24,8 +22,22 @@ type LambdaShape = {
   res: unknown
   
 };
+// export type LambdaInvokeWrapperArgs<Lbd extends LambdaBase<any, any, any, any, any, any>> =
+//   Lbd extends LambdaBase<infer Shape, infer Res, infer LocalData, infer LaunchData, infer Cdc, infer Env>
+//     ? {
+//         
+//         jsfnImport: (fp: string) => any,
+//         debug:      boolean,
+//         logger:     Logger,
+//         codec:      Cdc,
+//         launchData: LaunchData,
+//         shapeData:  Pick<Shape, 'ctx' | 'req'>,
+//         invokeFn:   LambdaBase<Shape, Res, LocalData, LaunchData, Cdc, Env>['invokeFn']
+//         
+//       }
+//     : never;
 
-export class LambdaBase<
+export abstract class LambdaBase<
   Shape extends LambdaShape,  // AWS and lambda i/o
   Res,                        // The lambda's particular response
   LocalData extends Jsfn,     // Data provided to lambda by project
@@ -47,16 +59,15 @@ export class LambdaBase<
       : `const ${           v  } = require('${p}');`
   };
   
-  private memoryMb:  number;
-  private network:   null | Network;
-  private name:      string;
-  private localData: (() => Promise<LocalData>) | Promise<LocalData> | (() => LocalData) | LocalData;
-  private codec:     Cdc;
-  private baseUrl:   string;
-  private launchFn:  (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, localData: LocalData }) => LaunchData;
-  private invokeFn:  (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, raw: Pick<Shape, 'ctx' | 'req'>, launchData: LaunchData, args: Codec.Out<Cdc> }) => Res;
-  private role:      Role;
-  private env:       Env;
+  protected memoryMb:  number;
+  protected network:   null | Network;
+  protected name:      string;
+  protected localData: (() => Promise<LocalData>) | Promise<LocalData> | (() => LocalData) | LocalData;
+  protected codec:     Cdc;
+  protected baseUrl:   string;
+  protected launchFn:  (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, localData: LocalData }) => LaunchData;
+  protected invokeFn:  (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, raw: Pick<Shape, 'ctx' | 'req'>, launchData: LaunchData, args: Codec.Out<Cdc> }) => Res;
+  protected env:       Env;
   
   constructor(args: {
     
@@ -68,7 +79,6 @@ export class LambdaBase<
     baseUrl:   string,
     launchFn:  (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, localData: LocalData }) => LaunchData,
     invokeFn:  (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, raw: Pick<Shape, 'ctx' | 'req'>, launchData: LaunchData, args: Codec.Out<Cdc> }) => Res,
-    role:      Role,
     env:       Env
     
   }) {
@@ -88,17 +98,14 @@ export class LambdaBase<
     this.baseUrl   = args.baseUrl;
     this.launchFn  = args.launchFn;
     this.invokeFn  = args.invokeFn;
-    this.role      = args.role;
     this.env       = args.env;
     
   }
   
   public getName() { return this.name; }
-  public getRole() { return this.role; }
   
   public * getDependencies() {
     yield* super.getDependencies();
-    yield* this.role.getDependencies();
     if (this.network) yield* this.network.getDependencies();
   }
   
@@ -110,13 +117,14 @@ export class LambdaBase<
     
   }
   
-  public getGenericCodecFn(): () => Codec.Rec<any> {
-    
-    throw Error('logic missing');
-    
-  }
+  public abstract getGenericCodecFn(): () => Codec.Rec<any>;
   
-  public getInvokeWrapper(): (args: {
+  public abstract getInvokeWrapper(): (args: {
+    
+    // Returns a sovereign function which:
+    // - Takes all data relevant to a single invocation, represented by `args`
+    // - Calls `args.invokeFn` with the appropriate data
+    // - Returns a correctly-shaped response
     
     jsfnImport: (fp: string) => any,
     debug:      boolean,
@@ -126,14 +134,23 @@ export class LambdaBase<
     shapeData:  Pick<Shape, 'ctx' | 'req'>,
     invokeFn:   LambdaBase<Shape, Res, LocalData, LaunchData, Cdc, Env>['invokeFn']
     
-  }) => Promise<Shape['res']> {
+  }) => Promise<Shape['res']>;
+  
+  public getRolePetal(ctx: Context) {
     
-    // Returns a sovereign function which:
-    // - Takes all data relevant to a single invocation, represented by `args`
-    // - Calls `args.invokeFn` with the appropriate data
-    // - Returns a correctly-shaped response
-    
-    throw Error('logic missing');
+    return new PetalTerraform.Resource('awsIamRole', this.name, {
+      name: `${ctx.pfx}-${this.name}`,
+      assumeRolePolicy: tf.json(aws.capitalKeys({
+        version: '2012-10-17',
+        statement: [
+          {
+            principal: { service: 'lambda.amazonaws.com' },
+            effect: 'Allow',
+            action: 'sts:AssumeRole'
+          }
+        ]
+      }))
+    });
     
   }
   
@@ -414,11 +431,17 @@ export class LambdaBase<
     
     const resolvedName = `${args.ctx.pfx}-${this.name}`;
     
+    if (!this.baseUrl[cl.hasHead]('file:///'))
+      throw Error('non-file bundle base url invalid')[cl.mod]({ baseUrl: this.baseUrl });
+    
+    const fileFact = rootFact.kid([ this.baseUrl.slice('file:///'.length) ]);
+    const dirFact = fileFact.par();
+    
     const packedCode = await scriptBundle({
       debug: args.ctx.debug,
       platform: 'node/cjs',
       script,
-      dirFact: rootFact.kid([ this.baseUrl ])
+      dirFact
     });
     
     const zippedCode = await (async () => {
@@ -441,7 +464,7 @@ export class LambdaBase<
     
     return { script, packedCode, zippedCode, hash: await hash(packedCode) };
     
-  } 
+  }
   async getPetals(ctx: Context & { soil: Soil.Base }) {
     
     const resolvedName = `${ctx.pfx}-${this.name}`;
@@ -449,24 +472,37 @@ export class LambdaBase<
     const { script, packedCode, zippedCode, hash } = await this.getBundle({ ctx, lang: 'js' });
     
     const { Resource, File } = PetalTerraform;
-    const zipFile =        new File(`literal/lambda/${this.name}.js.zip`, zippedCode);
+    const zipFile        = new File(`literal/lambda/${this.name}.js.zip`, zippedCode);
     const sourceCodeFile = new File(`literal/lambda/${this.name}.ts`,     script    ); // Consider removing; it's only for debug purposes
     const packedCodeFile = new File(`literal/lambda/${this.name}.js`,     packedCode); // Consider removing; it's only for debug purposes
     
-    const roleTfEnt = await (async () => {
-      
-      for await (const petal of await this.role.getPetals(ctx))
-        if (petal.getType() === 'awsIamRole')
-          return petal;
-      throw Error('role iam petal missing');
-      
-    })();
+    const role = this.getRolePetal(ctx);
+    const policy = new Resource('awsIamPolicy', this.name, {
+      name: `${ctx.pfx}-${this.name}`,
+      policy: tf.json(aws.capitalKeys({
+        version: '2012-10-17',
+        statement: [
+          {
+            // Grant logging permissions
+            effect: 'Allow',
+            action: [ 'logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents' ],
+            // arn:partition:service:region:accountId:resource
+            resource: [ `arn:aws:logs:*:*:*` ]
+          }
+        ]
+      }))
+    });
+    const attach = new Resource('awsIamRolePolicyAttachment', this.name, {
+      // No need to insert context.stage here!
+      role:      role.ref('name'),
+      policyArn: policy.ref('arn')
+    });
     
     const lambda = new Resource('awsLambdaFunction', this.name, {
       
       functionName: resolvedName,
       runtime:      LambdaBase.awsNodeRuntime,
-      role:         roleTfEnt.ref('arn'),
+      role:         role.ref('arn'),
       handler:      `${resolvedName}/code.handler`,
       filename:     zipFile.refStr(), // Should be a string in terraform
       timeout:      20,               // Seconds
@@ -506,7 +542,7 @@ export class LambdaBase<
       
       if (this.network) {
         
-        const policy = new PetalTerraform.Resource('awsIamPolicy', `${this.name}VpcPolicy`, {
+        const policy = new Resource('awsIamPolicy', `${this.name}VpcPolicy`, {
           name: `${ctx.pfx}-${this.name}Vpc`,
           policy: tf.json(aws.capitalKeys({ version: '2012-10-17', statement: [{
             effect: phrasing('camel->kamel', 'allow'),
@@ -519,8 +555,8 @@ export class LambdaBase<
           }]}))
         });
         
-        const attachment = new PetalTerraform.Resource('awsIamRolePolicyAttachment', `${this.name}VpcPolicy`, {
-          role:      roleTfEnt.ref('name'),
+        const attachment = new Resource('awsIamRolePolicyAttachment', `${this.name}VpcPolicy`, {
+          role:      role.ref('name'),
           policyArn: policy.ref('arn')
         });
         
@@ -536,11 +572,11 @@ export class LambdaBase<
     // lambda's log group by simply defining a log group with the correct name the lambda will try
     // to log to!
     const logGroup = new PetalTerraform.Resource('awsCloudwatchLogGroup', this.name, {
-      name:            `/aws/lambda/${tf.embed(lambda.ref('functionName'))}`,
+      name:            `/aws/lambda/${tf.embed(lambda.refStr('functionName'))}`,
       retentionInDays: 14
     });
     
-    return [ zipFile, sourceCodeFile, packedCodeFile, lambda, logGroup, ...policyTfEnts ];
+    return [ zipFile, sourceCodeFile, packedCodeFile, role, policy, attach, lambda, logGroup, ...policyTfEnts ];
     
   }
   

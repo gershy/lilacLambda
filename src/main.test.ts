@@ -4,7 +4,10 @@ import { LambdaAwsHttp, LambdaBase } from './main.ts';
 import Logger from '@gershy/logger';
 import { Fact, rootFact, tempFact } from '@gershy/disk';
 import codecParse, { type Codec } from '@gershy/util-codec-parse';
-import { Registry } from '@gershy/lilac';
+import { Garden, Registry, Soil, type Context } from '@gershy/lilac';
+import { getRootLogger } from '@gershy/entry';
+import { LambdaClient, ListFunctionsCommand } from '@aws-sdk/client-lambda';
+import type { Jsfn } from '@gershy/util-jsfn-encode';
 
 // Type testing
 (async () => {
@@ -65,7 +68,6 @@ testRunner([
       invokeFn: args => ({})[cl.merge](args.launchData)[cl.merge]({
         body: { req: args.args }
       }),
-      role: null as any,
       env: {}
     });
     
@@ -188,13 +190,135 @@ testRunner([
     const { heavy = false } = args;
     if (!heavy) return void console.log('Skipping test');
     
-    // TODO: HEEERE1 provision localStack lambda, invoke it simply with aws lambda client (it's a
-    // generic, non-http lambda!)
+    const logger = getRootLogger({ filter: ctx => true, lineWidth: 200 });
+    logger.log({ $$: 'launch' });
+    
+    type MyLambdaShape = {
+      ctx: Obj<unknown>,
+      req: Json,
+      res: Json
+    };
+    class MyLambda<
+      Res,
+      LocalData extends { [K: string]: Jsfn },
+      LaunchData,
+      Cdc extends Codec.Rec<any>,
+      Env extends Obj<string>
+    > extends LambdaBase<MyLambdaShape, Res, LocalData, LaunchData, Cdc, Env> {
+      
+      getGenericCodecFn() {
+        
+        return () => ({ type: 'rec', props: { body: { type: 'any' } } } as const);
+        
+      }
+      getInvokeWrapper() {
+        
+        return async (args: {
+          jsfnImport: (fp: string) => any,
+          debug:      boolean,
+          logger:     Logger,
+          codec:      Cdc,
+          launchData: LaunchData,
+          shapeData:  Pick<MyLambdaShape, 'ctx' | 'req'>,
+          invokeFn:   LambdaBase<MyLambdaShape, Res, LocalData, LaunchData, Cdc, Env>['invokeFn']
+        }) => {
+          
+          return { desc: 'my lambda response', req: args.shapeData.req };
+          
+        };
+        
+      }
+      
+    };
+    
     const registry = new Registry({
-      Lambda: { real: LambdaBase, test: LambdaBase }
+      MyLambda: { real: MyLambda, test: MyLambda }
     });
     
-    if (0) console.log(registry);
+    const shedFact = tempFact.kid([ '@gershy' ]);
+    const patioFact = fact.kid([ 'repo', 'patio' ]);
+    const gardenFact = fact.kid([ 'repo', 'terraform' ]);
+    const context: Context = {
+      name: 'hi',
+      fact: gardenFact,
+      patioFact,
+      shedFact,
+      logger: logger.kid('garden'),
+      maturity: 'm0',
+      debug: false,
+      pfx: 'tezzzt',
+    };
+    
+    const garden = new Garden({
+      context,
+      registry,
+      define: function*(ctx, registry) {
+        
+        // TODO: Should every flower constructor take `ctx`? Then wouldn't have to pass it later...
+        
+        yield new registry.MyLambda({
+          name: 'test',
+          memoryMb: 1024,
+          localData: {
+            fn1: (a: string, b: number) => 'z'.repeat(b).split('').join(a)
+          },
+          codec: { type: 'rec', props: { body: {
+            type: 'rec',
+            props: { a: { type: 'str' }, b: { type: 'num' } }
+          }}} as const,
+          baseUrl: import.meta.url,
+          launchFn: ctx => {
+            
+            return { fn2: (a: string, b: number) => ctx.localData.fn1(`(${a})`, b) };
+            
+          },
+          invokeFn: ctx => {
+            
+            const { a, b } = ctx.args.body;
+            return { result: ctx.launchData.fn2(a, b) };
+            
+            // Not an http response - can be either Json or binary response - TODO: think about how
+            // the typing can tighten the response! Currently it can be `any`...
+            
+          },
+          env: {}
+        });
+        
+      }
+    });
+    
+    const soil = new Soil.LocalStack({ logger, aws: { region: 'ca-central-1' }, registry });
+    const localStack = await soil.run();
+    
+    try {
+      
+      // TODO: real/fake -> natural/plastic
+      // TODO: terraform logical apply (init/apply boot, init/apply proj) should not log errors
+      // unless the entire logical apply fails (pass Logger.dummy)
+      await garden.grow({ type: 'real', soil });
+      
+      const apis = await localStack.getApis();
+      
+      const lambda = new LambdaClient({
+        region: 'ca-central-1',
+        endpoint: process.env.LOCALSTACK_URL ?? 'http://127.0.0.1:4566',
+        credentials: { accessKeyId: 'test', secretAccessKey: 'test' }
+      });
+
+      const listed = await lambda.send(new ListFunctionsCommand({}));
+      const awsLbd = (listed.Functions ?? []).find(f => (f.FunctionName ?? '').includes('tezzzt'));
+      console.log({ listed, awsLbd });
+      
+      // HEEERE2 INVOKE LAMBDA! Also getGitPending...
+      
+      logger.log({ apis });
+      
+    } finally {
+      
+      logger.log({ $$: 'finish' });
+      await soil.end();
+      
+    }
     
   })}
   
