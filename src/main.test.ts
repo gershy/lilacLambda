@@ -289,15 +289,14 @@ testRunner([
     
     const soil = new Soil.LocalStack({ logger, aws: { region: 'ca-central-1' }, registry });
     const localStack = await soil.run();
+    void localStack;
     
     try {
       
       // TODO: real/fake -> natural/plastic
-      // TODO: terraform logical apply (init/apply boot, init/apply proj) should not log errors
-      // unless the entire logical apply fails (pass Logger.dummy)
       await garden.grow({ type: 'real', soil });
       
-      const apis = await localStack.getApis();
+      // const apis = await localStack.getApis();
       
       const lambda = new LambdaClient({
         region: 'ca-central-1',
@@ -310,8 +309,6 @@ testRunner([
       console.log({ listed, awsLbd });
       
       // HEEERE2 INVOKE LAMBDA! Also getGitPending...
-      
-      logger.log({ apis });
       
     } finally {
       

@@ -59,6 +59,8 @@ export abstract class LambdaBase<
       : `const ${           v  } = require('${p}');`
   };
   
+  static getAwsServices(): Soil.LocalStackAwsService[] { return [ 'lambda', 'iam', 'logs' ]; }
+  
   protected memoryMb:  number;
   protected network:   null | Network;
   protected name:      string;
