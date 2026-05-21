@@ -1,13 +1,14 @@
-import { assertEqual, cmpJson, testRunner } from '../build/utils.test.ts';
+import { assertEqual, cmpAny, testRunner, cmpReg } from '../build/utils.test.ts';
 import './main.ts';
-import { LambdaAwsHttp, LambdaBase } from './main.ts';
+import { LambdaBase } from './main.ts';
 import Logger from '@gershy/logger';
 import { Fact, rootFact, tempFact } from '@gershy/disk';
 import codecParse, { type Codec } from '@gershy/util-codec-parse';
 import { Garden, Registry, Soil, type Context } from '@gershy/lilac';
 import { getRootLogger } from '@gershy/entry';
-import { LambdaClient, ListFunctionsCommand } from '@aws-sdk/client-lambda';
+import { InvokeCommand, LambdaClient, ListFunctionsCommand } from '@aws-sdk/client-lambda';
 import type { Jsfn } from '@gershy/util-jsfn-encode';
+import { JsfnUtility } from './import.test.ts';
 
 // Type testing
 (async () => {
@@ -52,22 +53,115 @@ const getSubtree = async (ent: Fact, enc: 'bin' | 'str' | 'json') => {
   
 };
 
+const logger = getRootLogger({ name: 'test', filter: ctx => true, lineWidth: 150, maxStrLen: 1000, objDepth: 7 });
 const args = eval(`(${ process.argv.find(v => v[0] === '{') ?? '{}' })`);
+
+const { MyLambda } = (() => {
+  
+  type MyLambdaShape = {
+    ctx: Obj<unknown>,
+    req: Json,
+    res: Json
+  };
+  class MyLambda<
+    Res,
+    LocalData extends { [K: string]: Jsfn },
+    LaunchData,
+    Cdc extends Codec.Rec<any>,
+    Env extends Obj<string>
+  > extends LambdaBase<MyLambdaShape, Res, LocalData, LaunchData, Cdc, Env> {
+    
+    getGenericCodecFn() {
+      
+      return () => ({ type: 'rec', props: { a: { type: 'str' }, b: { type: 'num' } } } as const);
+      
+    }
+    getInvokeWrapper() {
+      
+      return async (args: {
+        jsfnImport: (fp: string) => any,
+        debug:      boolean,
+        logger:     Logger,
+        codec:      Cdc,
+        launchData: LaunchData,
+        shapeData:  Pick<MyLambdaShape, 'ctx' | 'req'>,
+        invokeFn:   LambdaBase<MyLambdaShape, Res, LocalData, LaunchData, Cdc, Env>['invokeFn']
+      }) => {
+        
+        const { default: codecParse } = args.jsfnImport('@gershy/util-codec-parse') as typeof import('@gershy/util-codec-parse');
+        
+        const invokeArgs = (() => {
+          
+          try {
+            return {
+              success: true as const,
+              result: codecParse(args.codec, args.shapeData.req)
+            };
+          } catch (err: any) {
+            
+            return {
+              success: false as const,
+              overview: {
+                desc: 'input reject',
+                args: err.args ?? null,
+                chain: err.chain ?? [],
+                guard: (err.fn ?? (args => false)).toString().replace(/\s+/g, ' ')
+              }
+            };
+            
+          }
+          
+        })();
+        
+        if (!invokeArgs.success) return {
+          desc: 'my lambda failed, very sad',
+          ctx: args.shapeData.ctx as any,
+          req: args.shapeData.req,
+          res: invokeArgs.overview
+        };
+        
+        return {
+          desc: 'my lambda response',
+          ctx: args.shapeData.ctx as any,
+          req: args.shapeData.req,
+          res: args.invokeFn({
+            ...args[cl.slice]([ 'debug', 'logger', 'jsfnImport', 'launchData', 'shapeData' ]),
+            args: invokeArgs.result
+          }) as Json
+        };
+        
+      };
+      
+    }
+    
+  };
+  
+  return { MyLambda };
+  
+})();
 
 testRunner([
   
   { name: 'sourcecode gen', fn: async () => {
     
-    const lbd = new LambdaAwsHttp({
+    // Instantiates a `JsfnUtility` instance with `a = 'util'`, and takes an http body param `b`,
+    // which is a number, to call `JsfnUtility.prototype.helperFn`, which returns `a.repeat(b)`
+    
+    const lbd = new MyLambda({
       name: 'myLbd',
-      memoryMb: 128,
-      localData: { z: 'hi' },
-      codec: { type: 'rec', props: {} },
       baseUrl: import.meta.url,
-      launchFn: args => ({ code: 200, body: { desc: 'test', localData: args.localData } }),
-      invokeFn: args => ({})[cl.merge](args.launchData)[cl.merge]({
-        body: { req: args.args }
-      }),
+      memoryMb: 128,
+      localData: {
+        z: 'hi',
+        utility: new JsfnUtility({ a: 'util' })
+      },
+      codec: { type: 'rec' as const, props: { num: { type: 'num' as const } } },
+      launchFn: args => ({ utility: args.localData.utility }),
+      invokeFn: ({ launchData, args }) => {
+        
+        return launchData.utility.helperFn({ b: args.num });
+        
+      },
       env: {}
     });
     
@@ -78,7 +172,6 @@ testRunner([
         fact:      rootFact.kid([ import.meta.dirname, 'infra' ]),
         patioFact: rootFact.kid([ import.meta.dirname, 'infra', 'patio' ]),
         shedFact:  tempFact.kid([ '@gershy' ]),
-        
         maturity: 'm0',
         debug: true,
         pfx: 'test'
@@ -102,9 +195,9 @@ testRunner([
     builtStrsCodec.item.opts.push(builtStrsCodec);
     
     const require = (term: string) => {
-      if (term === '@gershy/clearing') return null;
+      if (term === '@gershy/clearing') return null;                                           // Clearing not necessary - already loaded!
       if (term === '@gershy/logger') return { default: function() { return Logger.dummy; } }; // Silence lambda logs
-      if (term === '@gershy/util-codec-parse') return { default: codecParse };
+      if (term === '@gershy/util-codec-parse') return { default: codecParse };                // Pass our codec parsing lib
       throw Error('mock require unaware')[cl.mod]({ term });
     };
     const invoke = eval(String[cl.baseline](`
@@ -119,66 +212,15 @@ testRunner([
       | })
     `))({ require });
     
-    const res = await invoke({
-      ctx: {
-        callbackWaitsForEmptyEventLoop: false,
-        clientContext:                  {},
-        invokedFunctionArn:             'invoked-function-arn',
-        awsRequestId:                   'aws-request-id',
-        getRemainingTimeInMillis:       () => 1000 * 60 * 10
-      },
-      req: {
-        path: '/test/path',
-        httpMethod: 'GET',
-        headers: {
-          'User-Agent': 'its a test lmao',
-          'cookie': 'k0=cookie0;k1=cookie1;'
-        },
-        multiValueHeaders: {
-          'User-Agent': [ 'its a test lmao' ],
-          'Cookie': [
-            'k0=cookie0;k1=cookie1;',
-            ';;;   ;  k2=cookie2   ; k4 = cookie444  ;;    ;',
-            ';',
-            ' =j  =  ',
-            '   ;;;;;'
-          ]
-        },
-        queryStringParameters: {
-          'built.up.query.string': 'test',
-        },
-        multiValueQueryStringParameters: {
-          'built.query.string': [ 'test' ],
-        },
-        requestContext: {
-          identity: { sourceIp: '127.0.0.1' },
-          stage:    'stage',
-          domainName: 'test.local.com',
-          resourceId: 'resource-id',
-          stageVariables: {}
-        },
-        body: JSON.stringify({ its: [ 'my', { test: 'body' }, null, null, null, 100 ] })
-      }
-    });
+    const res = await invoke({ a: 'ignored', b: 'also ignored'.length, num: 4 }, { desc: 'ctx!' });
+    
+    logger.log({ res });
     
     assertEqual(res, {
-      headers: { 'content-type': 'application/json' },
-      body: [ cmpJson, {
-        desc: 'test',
-        localData: { z: 'hi' },
-        req: {
-          path: [ 'test', 'path' ],
-          method: 'get',
-          headers: { 'user-agent': [ 'its a test lmao' ] },
-          query: {
-            built: { query: { string: 'test' } }
-          },
-          cookies: { k0: 'cookie0', k1: 'cookie1', k2: 'cookie2', k4: 'cookie444' },
-          body: { its: [ 'my', { test: 'body' }, null, null, null, 100 ] }
-        }
-      }],
-      isBase64Encoded: false,
-      statusCode: 200
+      desc: 'my lambda response',
+      ctx: { desc: 'ctx!' },
+      req: { a: 'ignored', b: 12, num: 4 },
+      res: 'utilutilutilutil'
     });
     
   }},
@@ -190,46 +232,7 @@ testRunner([
     const { heavy = false } = args;
     if (!heavy) return void console.log('Skipping test');
     
-    const logger = getRootLogger({ filter: ctx => true, lineWidth: 200 });
     logger.log({ $$: 'launch' });
-    
-    type MyLambdaShape = {
-      ctx: Obj<unknown>,
-      req: Json,
-      res: Json
-    };
-    class MyLambda<
-      Res,
-      LocalData extends { [K: string]: Jsfn },
-      LaunchData,
-      Cdc extends Codec.Rec<any>,
-      Env extends Obj<string>
-    > extends LambdaBase<MyLambdaShape, Res, LocalData, LaunchData, Cdc, Env> {
-      
-      getGenericCodecFn() {
-        
-        return () => ({ type: 'rec', props: { body: { type: 'any' } } } as const);
-        
-      }
-      getInvokeWrapper() {
-        
-        return async (args: {
-          jsfnImport: (fp: string) => any,
-          debug:      boolean,
-          logger:     Logger,
-          codec:      Cdc,
-          launchData: LaunchData,
-          shapeData:  Pick<MyLambdaShape, 'ctx' | 'req'>,
-          invokeFn:   LambdaBase<MyLambdaShape, Res, LocalData, LaunchData, Cdc, Env>['invokeFn']
-        }) => {
-          
-          return { desc: 'my lambda response', req: args.shapeData.req };
-          
-        };
-        
-      }
-      
-    };
     
     const registry = new Registry({
       MyLambda: { real: MyLambda, test: MyLambda }
@@ -262,20 +265,15 @@ testRunner([
           localData: {
             fn1: (a: string, b: number) => 'z'.repeat(b).split('').join(a)
           },
-          codec: { type: 'rec', props: { body: {
-            type: 'rec',
-            props: { a: { type: 'str' }, b: { type: 'num' } }
-          }}} as const,
+          codec: { type: 'rec', props: { a: { type: 'str' }, b: { type: 'num' } } } as const,
           baseUrl: import.meta.url,
           launchFn: ctx => {
-            
             return { fn2: (a: string, b: number) => ctx.localData.fn1(`(${a})`, b) };
-            
           },
           invokeFn: ctx => {
             
-            const { a, b } = ctx.args.body;
-            return { result: ctx.launchData.fn2(a, b) };
+            const { a, b } = ctx.args;
+            return ctx.launchData.fn2(a, b);
             
             // Not an http response - can be either Json or binary response - TODO: think about how
             // the typing can tighten the response! Currently it can be `any`...
@@ -296,19 +294,64 @@ testRunner([
       // TODO: real/fake -> natural/plastic
       await garden.grow({ type: 'real', soil });
       
-      // const apis = await localStack.getApis();
-      
-      const lambda = new LambdaClient({
+      const lambdaClient = new LambdaClient({
         region: 'ca-central-1',
         endpoint: process.env.LOCALSTACK_URL ?? 'http://127.0.0.1:4566',
         credentials: { accessKeyId: 'test', secretAccessKey: 'test' }
       });
-
-      const listed = await lambda.send(new ListFunctionsCommand({}));
-      const awsLbd = (listed.Functions ?? []).find(f => (f.FunctionName ?? '').includes('tezzzt'));
-      console.log({ listed, awsLbd });
+      const awsLbd = await lambdaClient.send(new ListFunctionsCommand({}))
+        .then(listed => (listed.Functions ?? []).find(f => (f.FunctionName ?? '').includes('tezzzt')));
+      if (!awsLbd) throw Error('lambda missing');
       
-      // HEEERE2 INVOKE LAMBDA! Also getGitPending...
+      const invoke = async (args: any) => {
+        
+        const invoked = await lambdaClient.send(new InvokeCommand({
+          FunctionName: awsLbd.FunctionName,
+          Payload: Buffer.from(JSON.stringify(args))
+        }));
+        const result = JSON.parse(invoked.Payload!.transformToString('utf8'));
+        
+        // logger.log({ inp: args, out: result });
+        
+        return result;
+        
+      };
+      
+      const assertCtx = {
+        callbackWaitsForEmptyEventLoop: true,
+        functionVersion: '$LATEST',
+        functionName: 'tezzzt-test',
+        memoryLimitInMB: '1024',
+        awsRequestId: cmpAny,
+        logGroupName: cmpAny,
+        logStreamName: [ cmpReg, /^[0-9]{4}[/][0-9]{2}[/][0-9]{2}/ ],
+        invokedFunctionArn: [ cmpReg, /^arn:aws:lambda:ca-central-1:[0-9]{12}:function:tezzzt-test/ ],
+      };
+      
+      assertEqual(
+        await invoke({ a: 'x', b: 3 }),
+        {
+          desc: 'my lambda response',
+          ctx: assertCtx,
+          req: { a: 'x', b: 3 },
+          res: 'z(x)z(x)z'
+        }
+      );
+      
+      assertEqual(
+        await invoke({ a: 3, b: 'x' }),
+        {
+          desc: 'my lambda failed, very sad',
+          ctx: assertCtx,
+          req: { a: 3, b: 'x' },
+          res: {
+            desc: 'input reject',
+            args: { val: 3, minLen: 0, maxLen: 18446744073709552000 },
+            chain: [ 'a' ],
+            guard: cmpAny
+          }
+        }
+      );
       
     } finally {
       
@@ -318,5 +361,32 @@ testRunner([
     }
     
   })}
-  
+
 ]);
+
+/*
+shaina loves you very much like so much 
+
+that
+
+she cant really even
+
+quite express
+
+HOW 
+
+much!!!
+
+
+
+
+its wild.
+
+
+
+
+
+
+
+p.s clumpus loves u too
+*/

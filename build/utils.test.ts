@@ -8,6 +8,8 @@ const mod:   typeof cl.mod   = cl.mod;
 const limn:  typeof cl.limn  = cl.limn;
 
 export const cmpAny  = Symbol('@gershy/test/cmp/any');
+export const cmpReg  = Symbol('@gershy/test/cmp/reg');
+export const cmpFn   = Symbol('@gershy/test/cmp/fn');
 export const cmpJson = Symbol('@gershy/test/cmp/json');
 
 export const equal = (v0: any, v1: any, path: (string | number)[] = []): { equal: true } | { equal: false, path: (string | number)[], [K: string]: any } => {
@@ -15,9 +17,10 @@ export const equal = (v0: any, v1: any, path: (string | number)[] = []): { equal
   if (v0 === v1)                      return { equal: true };
   if (v0 == null || v1 == null)       return { equal: false, path, reason: 'identity', v0, v1 };
   
+  // Process direct marker symbols
   if (v1 === cmpAny) return { equal: true };
   
-  // Process 2-tuples whose first item is `cmpJson`
+  // Process tuples whose first item is a marker symbol
   if (v1[0] === cmpJson) {
     
     if (!isCls(v0, String)) return { equal: false, path, reason: 'nonstring', cls0: getCls(v0) };
@@ -28,6 +31,26 @@ export const equal = (v0: any, v1: any, path: (string | number)[] = []): { equal
     })();
     
     return equal(parsed, v1[1], [ ...path, '<json>' ]);
+    
+  }
+  
+  if (v1[0] === cmpReg) {
+    
+    if (!isCls(v0, String)) return { equal: false, path, reason: 'nonstring', cls0: getCls(v0) };
+    
+    const reg = v1[1] as RegExp;
+    return reg.test(v0)
+      ? { equal: true }
+      : { equal: false, path, reason: 'regex', regex: reg.toString() };
+    
+  }
+  
+  if (v1[0] === cmpFn) { // `v1` is `[ cmpFn, (val: any) => boolean ]`
+    
+    const result: boolean = v1[1](v0);
+    return result
+      ? { equal: true }
+      : { equal: false, path, reason: 'fn', fn: v1[1].toString().replace(/\s+/g, ' ') };
     
   }
   
