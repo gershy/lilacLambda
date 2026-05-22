@@ -22,6 +22,8 @@ export type LambdaShape = {
   res: unknown
   
 };
+export type AnyLambda = LambdaBase<any, any, any, any, any, any>;
+
 export abstract class LambdaBase<
   Shape extends LambdaShape,  // AWS and lambda i/o
   Res,                        // The lambda's particular response
@@ -48,7 +50,10 @@ export abstract class LambdaBase<
   protected memoryMb:  number;
   protected network:   null | Network;
   protected name:      string;
-  protected localData: (() => Promise<LocalData>) | Promise<LocalData> | (() => LocalData) | LocalData;
+  
+  // Important for a lambda instance to pass itself to its `localData` function - this allows the
+  // data to have awareness of the lambda, which is especially useful for setting up permissions!
+  protected localData: ((lbd: AnyLambda) => Promise<LocalData>) | Promise<LocalData> | ((lbd: AnyLambda) => LocalData) | LocalData;
   protected codec:     Cdc;
   protected baseUrl:   string;
   protected launchFn:  (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, localData: LocalData }) => LaunchData;
@@ -60,7 +65,7 @@ export abstract class LambdaBase<
     name:      string,
     memoryMb:  number,
     network?:  Network,
-    localData: (() => Promise<LocalData>) | Promise<LocalData> | (() => LocalData) | LocalData;
+    localData: ((lambda: LambdaBase<any, any, any, any, any, any>) => Promise<LocalData>) | Promise<LocalData> | (() => LocalData) | LocalData;
     codec:     Cdc,
     baseUrl:   string,
     launchFn:  (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, localData: LocalData }) => LaunchData,
@@ -98,7 +103,7 @@ export abstract class LambdaBase<
   public async getLocalData() {
     
     // Resolves our local data, which may have been provided in a function
-    if (cl.inCls(this.localData, Function)) this.localData = this.localData();
+    if (cl.inCls(this.localData, Function)) this.localData = this.localData(this);
     return this.localData as LocalData | Promise<LocalData>;
     
   }
