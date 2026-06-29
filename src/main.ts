@@ -74,7 +74,7 @@ export abstract class LambdaBase<
     
   }) {
     
-    if (!/^[a-zA-Z0-9]+$/.test(args.name)) throw Error('invalid name')[cl.mod]({ args });
+    if (!/^[a-z][a-zA-Z0-9]*$/.test(args.name)) throw Error('invalid name')[cl.mod]({ args });
     
     const memoryMb = args.memoryMb ?? 2048;
     if (memoryMb < 128 || memoryMb > 10240 || Math.floor(memoryMb) != memoryMb) throw Error('memory mb invalid')[cl.mod]({ memoryMb });
@@ -108,7 +108,10 @@ export abstract class LambdaBase<
     
   }
   
-  public abstract getGenericCodecFn(): () => Codec.Rec<any>;
+  // Note the overall codec used by a particular lambda is
+  // `lambda.getGenericCodecFn()[cl.merge](lambda.codec)` - so `lambda.codec` has the final say
+  // and needs to contain the generic codec's root to merge properly
+  public abstract getGenericCodecFn(): () => Codec.Registry;
   
   public abstract getInvokeWrapper(): (args: {
     
