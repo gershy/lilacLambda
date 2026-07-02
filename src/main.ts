@@ -459,7 +459,7 @@ export abstract class LambdaBase<
     return { script, packedCode, zippedCode, hash: await hash(packedCode) };
     
   }
-  async getPetals(ctx: Context & { soil: Soil.Base }) {
+  async computePetals(ctx: Context & { soil: Soil.Base }) {
     
     const resolvedName = `${ctx.pfx}-${this.name}`;
     
@@ -575,5 +575,3 @@ export abstract class LambdaBase<
   }
   
 };
-
-// TODO: HEEERE Websockets, L@E, petals, webpack, zip, test lambdas in localstack!

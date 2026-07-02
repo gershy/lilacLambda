@@ -53,7 +53,7 @@ const getSubtree = async (ent: Fact, enc: 'bin' | 'str' | 'json') => {
   
 };
 
-const logger = getRootLogger({ name: 'test', filter: ctx => true, lineWidth: 150, maxStrLen: 1000, objDepth: 7 });
+const logger = getRootLogger({ name: 'test', filter: ctx => true, maxLineLen: 150, maxStrLen: 1000, objDepth: 7 });
 const args = eval(`(${ process.argv.find(v => v[0] === '{') ?? '{}' })`);
 
 const { MyLambda } = (() => {
