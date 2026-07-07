@@ -261,7 +261,6 @@ export abstract class LambdaBase<
     
     const mergeJsImports = (jsImports: JsImport[]) => {
       
-      // TODO: HEEEERE!
       // Note merging fails if:
       // - The same variable name is used by different importers to reference different values (no
       //   good name available for these global refs!)
@@ -274,7 +273,7 @@ export abstract class LambdaBase<
       //      | const name4 = name2;
       //      | 
       
-      const merged = {} as Obj<{ full: string[], named: Obj<string[]> }>;
+      const merged: Obj<{ full: string[], named: Obj<string[]> }> = {};
       
       for (const ji of jsImports) {
         
