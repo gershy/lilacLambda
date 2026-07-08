@@ -211,8 +211,6 @@ testRunner([
     
     const res = await invoke({ a: 'ignored', b: 'also ignored'.length, num: 4 }, { desc: 'ctx!' });
     
-    console.log('\n\n\n', res.res);
-    
     assertEqual(
       res,
       {
