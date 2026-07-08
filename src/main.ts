@@ -142,6 +142,10 @@ export abstract class LambdaBase<
     
   }) => Promise<Shape['res']>;
   
+  public getPrincipalServices() {
+    return [ 'lambda.amazonaws.com' ];
+  }
+  
   public getRolePetal(ctx: Context) {
     
     return new PetalTerraform.Resource('awsIamRole', this.name, {
@@ -150,7 +154,7 @@ export abstract class LambdaBase<
         version: '2012-10-17',
         statement: [
           {
-            principal: { service: 'lambda.amazonaws.com' },
+            principal: { service: this.getPrincipalServices() },
             effect: 'Allow',
             action: 'sts:AssumeRole'
           }
