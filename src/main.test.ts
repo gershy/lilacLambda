@@ -103,7 +103,6 @@ const { MyLambda } = (() => {
               success: false as const,
               overview: {
                 desc: 'input reject',
-                err: err[cl.limn](),
                 args: err.args ?? null,
                 chain: err.chain ?? [],
                 guard: (err.fn ?? (args => false)).toString().replace(/\s+/g, ' ')
