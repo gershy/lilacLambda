@@ -71,11 +71,6 @@ const { MyLambda } = (() => {
     Env extends Obj<string>
   > extends LambdaBase<MyLambdaShape, Res, LocalData, LaunchData, Cdc, Env> {
     
-    getGenericCodecFn() {
-      
-      return () => ({ type: 'rec', props: { a: { type: 'str' }, b: { type: 'num' } } } as const);
-      
-    }
     getInvokeWrapper() {
       
       return async (args: {
@@ -93,16 +88,22 @@ const { MyLambda } = (() => {
         const invokeArgs = (() => {
           
           try {
+            
+            const nativeCodec = { type: 'rec', props: { a: { type: 'str' }, b: { type: 'num' } }, loose: true } as const;
+            const lambdaReq = codecParse(nativeCodec, args.shapeData.req);
+            const instanceReq = codecParse(args.codec, lambdaReq);
             return {
               success: true as const,
-              result: codecParse(args.codec, args.shapeData.req)
+              result: instanceReq
             };
+            
           } catch (err: any) {
             
             return {
               success: false as const,
               overview: {
                 desc: 'input reject',
+                err: err[cl.limn](),
                 args: err.args ?? null,
                 chain: err.chain ?? [],
                 guard: (err.fn ?? (args => false)).toString().replace(/\s+/g, ' ')
@@ -121,7 +122,7 @@ const { MyLambda } = (() => {
         };
         
         return {
-          desc: 'my lambda response',
+          desc: 'my lambda success',
           ctx: args.shapeData.ctx as any,
           req: args.shapeData.req,
           res: args.invokeFn({
@@ -155,13 +156,9 @@ testRunner([
         z: 'hi',
         utility: new JsfnUtility({ a: 'util' })
       },
-      codec: { type: 'rec' as const, props: { num: { type: 'num' as const } } },
+      codec: { type: 'rec' as const, props: { num: { type: 'num' as const } }, loose: true },
       launchFn: args => ({ utility: args.localData.utility }),
-      invokeFn: ({ launchData, args }) => {
-        
-        return launchData.utility.helperFn({ b: args.num });
-        
-      },
+      invokeFn: ({ launchData, args }) => launchData.utility.helperFn({ b: args.num }),
       env: {}
     });
     
@@ -214,14 +211,17 @@ testRunner([
     
     const res = await invoke({ a: 'ignored', b: 'also ignored'.length, num: 4 }, { desc: 'ctx!' });
     
-    logger.log({ res });
+    console.log('\n\n\n', res.res);
     
-    assertEqual(res, {
-      desc: 'my lambda response',
-      ctx: { desc: 'ctx!' },
-      req: { a: 'ignored', b: 12, num: 4 },
-      res: 'utilutilutilutil'
-    });
+    assertEqual(
+      res,
+      {
+        desc: 'my lambda success',
+        ctx: { desc: 'ctx!' },
+        req: { a: 'ignored', b: 12, num: 4 },
+        res: 'utilutilutilutil'
+      }
+    );
     
   }},
   
@@ -256,8 +256,6 @@ testRunner([
       context,
       registry,
       define: function*(ctx, registry) {
-        
-        // TODO: Should every flower constructor take `ctx`? Then wouldn't have to pass it later...
         
         yield new registry.MyLambda({
           name: 'test',
@@ -331,7 +329,7 @@ testRunner([
       assertEqual(
         await invoke({ a: 'x', b: 3 }),
         {
-          desc: 'my lambda response',
+          desc: 'my lambda success',
           ctx: assertCtx,
           req: { a: 'x', b: 3 },
           res: 'z(x)z(x)z'

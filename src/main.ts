@@ -13,24 +13,41 @@ import type { Codec }                                 from '@gershy/util-codec-p
 import * as aws                                       from './util/aws.ts';
 import * as tf                                        from './util/terraform.ts';
 
-export type LambdaShape = {
+// TODO: The LambdaShape only includes *native* req/res; a codec transforms the native req into a
+// shape that is more convenient for implementors - but there are two aspects to this: the 1st is
+// handling generic transformations that should apply to all implementors of a given lambda class;
+// e.g. for http lambdas the headers should always be transformed away from aws' pretentious format
+// regardless of what the domain-specific lambda is doing. But of course the implementor wants to
+// narrow down the request further, e.g. they want to ensure the http body contains the correct
+// json subset the lambda processes. Currently both the lambda cls and implementor provide their
+// own codecs, and we `cl.merge` them together. This would be MUCH more friendly if we simply:
+// 1. Run an initial pretentious->nice transformation on the incoming payload; no codec required!
+// 2. Run the user's specific codec on that "nice" payload
+// This design probably requires every lambda cls to specify *both* the pretentious and nice
+// formats it deals with - maybe the lambda cls can provide a guard function? Faster than a codec!
+// For an http lambda, the guard would look like:
+//    | (req: Pretentious) => ({ headers: Obj<string>, query: Obj<string>, body: unknown })
+// Where `body: unknown` indicates that's probably where users want to begin enforcing their
+// custom codecs...
+
+export type LambdaNativeShape = {
   
   // Represents the raw provider Lambda typing, with req+res and any additional context
   
   ctx: Obj<unknown>,
-  req: unknown,
-  res: unknown
+  req: unknown, // The raw/native request that is sent over-the-wire directly to the lambda (e.g. aws format)
+  res: unknown  // The raw/native response returned by the lamdba (e.g. aws format)
   
 };
 export type AnyLambda = LambdaBase<any, any, any, any, any, any>;
 
 export abstract class LambdaBase<
-  Shape extends LambdaShape,  // AWS and lambda i/o
-  Res,                        // The lambda's particular response
-  LocalData extends Jsfn,     // Data provided to lambda by project
-  LaunchData,                 // Arbitrary data initialized by lambda on cold-start
-  Cdc extends Codec.Rec<any>, // Codec for validating incoming invocation args
-  Env extends Obj<string>     // Environment vars (main use-case is for passing arbitrary infra values to lambda)
+  Shape extends LambdaNativeShape, // AWS and lambda i/o
+  Res,                             // The lambda's particular response
+  LocalData extends Jsfn,          // Data provided to lambda by project
+  LaunchData,                      // Arbitrary data initialized by lambda on cold-start
+  Cdc extends Codec.Rec<any>,      // Codec for validating incoming invocation args
+  Env extends Obj<string>          // Environment vars (main use-case is for passing arbitrary infra values to lambda)
 > extends Flower {
   
   static importTs = (v: null | string, p: string) => v ? `import ${v} from '${p}';` : `import '${p}';`;
@@ -107,11 +124,6 @@ export abstract class LambdaBase<
     return this.localData as LocalData | Promise<LocalData>;
     
   }
-  
-  // Note the overall codec used by a particular lambda is
-  // `lambda.getGenericCodecFn()[cl.merge](lambda.codec)` - so `lambda.codec` has the final say
-  // and needs to contain the generic codec's root to merge properly
-  public abstract getGenericCodecFn(): () => Codec.Registry;
   
   public abstract getInvokeWrapper(): (args: {
     
@@ -225,12 +237,11 @@ export abstract class LambdaBase<
       codec:         Cdc,
       invokeFn:      InvokeFn
     };
-    const code = {
+    const jsfn = {
       
       // Note how codec merging works - we want to allow the consumer to avoid defining codecs for
       // "generic" argument components, e.g. headers, cookies, but with the ability to expect
       // certain values from them if necessary, e.g. requiring a header in a specific format
-      genericCodecFn: jsfnEncode({ baseUrl: this.baseUrl,    val: this.getGenericCodecFn() }),
       codec:          jsfnEncode({ baseUrl: this.baseUrl,    val: this.codec               }),
       launchFn:       jsfnEncode({ baseUrl: this.baseUrl,    val: this.launchFn            }),
       invokeFn:       jsfnEncode({ baseUrl: this.baseUrl,    val: this.invokeFn            }),
@@ -390,23 +401,22 @@ export abstract class LambdaBase<
       ...getImports({
         mergedImports: mergeJsImports([
           { varDef: null, importPath: '@gershy/clearing' }, // Ensure clearing is imported
-          ...code[cl.toArr](v => v.jsImports).flat(1)
+          ...jsfn[cl.toArr](v => v.jsImports).flat(1)
         ]),
         lang: args.lang
       }),
       
-      `const genericCodec = ${code.genericCodecFn.code};                                         `,
-      `const codec = ${code.codec.code};                                                         `,
-      `const fullCodec = (genericCodec())[cl.merge](cl.inCls(codec, Function) ? codec() : codec);`,
+      `const codec = ${jsfn.codec.code};                                                         `,
       `const localData = ${localData.code};                                                      `,
-      `const launchFn = ${code.launchFn.code};                                                   `,
-      `const invokeFn = ${code.invokeFn.code};                                                   `,
-      `const invokeWrapper = ${code.invokeWrapper.code};                                         `,
-      `const mainFn = (${code.getMainFn.code})({                                                 `,
+      `const launchFn = ${jsfn.launchFn.code};                                                   `,
+      `const invokeFn = ${jsfn.invokeFn.code};                                                   `,
+      `const invokeWrapper = ${jsfn.invokeWrapper.code};                                         `,
+      `const mainFn = (${jsfn.getMainFn.code})({                                                 `,
       `  jsfnImport: jsImp => Error('jsfn import failed')[cl.fire]({ import: jsImp }),           `,
       `  name: '${slashEscape(this.name, `'`)}',                                                 `,
       `  debug: ${args.ctx.debug ? 'true' : 'false'},                                            `,
-      `  codec: fullCodec, localData, invokeWrapper, launchFn, invokeFn                          `,
+      `  codec: cl.inCls(codec, Function) ? codec() : codec,                                     `,
+      `  localData, invokeWrapper, launchFn, invokeFn,                                           `,
       `});                                                                                       `,
       
       {
@@ -454,10 +464,10 @@ export abstract class LambdaBase<
     // contents(!) causing hashes to change as code remains the same - using option #2 for now;
     // at present this is safe as the zip file contains nothing other than the single js file!
     
-    
     return { script, packedCode, zippedCode, hash: await hash(packedCode) };
     
   }
+  
   async computePetals(ctx: Context & { soil: Soil.Base }) {
     
     const resolvedName = `${ctx.pfx}-${this.name}`;
