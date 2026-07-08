@@ -89,7 +89,7 @@ const { MyLambda } = (() => {
           
           try {
             
-            const nativeCodec = { type: 'rec', props: { a: { type: 'str' }, b: { type: 'num' } }, loose: true } as const;
+            const nativeCodec = { type: 'rec', loose: true, props: { a: { type: 'str' }, b: { type: 'num' } } } as const;
             const lambdaReq = codecParse(nativeCodec, args.shapeData.req);
             const instanceReq = codecParse(args.codec, lambdaReq);
             return {
@@ -155,7 +155,7 @@ testRunner([
         z: 'hi',
         utility: new JsfnUtility({ a: 'util' })
       },
-      codec: { type: 'rec' as const, props: { num: { type: 'num' as const } }, loose: true },
+      codec: { type: 'rec', loose: true, props: { num: { type: 'num' } } } as const,
       launchFn: args => ({ utility: args.localData.utility }),
       invokeFn: ({ launchData, args }) => launchData.utility.helperFn({ b: args.num }),
       env: {}
@@ -174,21 +174,6 @@ testRunner([
       },
       lang: 'js'
     });
-    
-    let builtStrsCodec: Codec.Map<any> = { type: 'map', item: {
-      type: 'oneOf',
-      opts: [
-        { type: 'str' },
-        // { type: 'map', item: {
-        //   type: 'oneOf',
-        //   opts: [
-        //     { type: 'str' },
-        //     { type: 'map', item: { type: 'str' }}
-        //   ]
-        // }}
-      ]
-    }};
-    builtStrsCodec.item.opts.push(builtStrsCodec);
     
     const require = (term: string) => {
       if (term === '@gershy/clearing') return null;                                           // Clearing not necessary - already loaded!
