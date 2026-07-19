@@ -1,6 +1,6 @@
 {
   "name": "@gershy/lilac-lambda",
-  "version": "0.0.19",
+  "version": "0.0.20",
   "author": "Gershom Maes",
   "description": "Lilac lambda function flower",
   "keywords": [],
@@ -18,23 +18,23 @@
   ],
   "license": "ISC",
   "peerDependencies": {
-    "@gershy/clearing": "^0.0.46"
+    "@gershy/clearing": "^0.0.47"
   },
   "devDependencies": {
-    "@gershy/entry": "^0.0.15",
+    "@gershy/entry": "^0.0.16",
     "@types/node": "^24.10.1"
   },
   "dependencies": {
     "@aws-sdk/client-lambda": "^3.1045.0",
-    "@gershy/lilac": "^0.0.43",
-    "@gershy/lilac-network": "^0.0.16",
-    "@gershy/logger": "^0.0.14",
-    "@gershy/script-bundle": "^0.0.8",
-    "@gershy/util-codec-parse": "^0.0.14",
-    "@gershy/util-hash": "^0.0.19",
-    "@gershy/util-jsfn-encode": "^0.0.11",
-    "@gershy/util-phrasing": "^0.0.12",
-    "@gershy/util-slash-escape": "^0.0.8",
+    "@gershy/lilac": "^0.0.44",
+    "@gershy/lilac-network": "^0.0.17",
+    "@gershy/logger": "^0.0.15",
+    "@gershy/script-bundle": "^0.0.9",
+    "@gershy/util-codec-parse": "^0.0.15",
+    "@gershy/util-hash": "^0.0.20",
+    "@gershy/util-jsfn-encode": "^0.0.12",
+    "@gershy/util-phrasing": "^0.0.13",
+    "@gershy/util-slash-escape": "^0.0.9",
     "jszip": "^3.10.1"
   },
   "exports": {

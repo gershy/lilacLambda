@@ -4,7 +4,7 @@ import { LambdaBase } from './main.ts';
 import Logger from '@gershy/logger';
 import { Fact, rootFact, tempFact } from '@gershy/disk';
 import codecParse, { type Codec } from '@gershy/util-codec-parse';
-import { Garden, Registry, Soil, type Context } from '@gershy/lilac';
+import { Garden, SeedBank, Soil, type Context } from '@gershy/lilac';
 import { getRootLogger } from '@gershy/entry';
 import { InvokeCommand, LambdaClient, ListFunctionsCommand } from '@aws-sdk/client-lambda';
 import type { Jsfn } from '@gershy/util-jsfn-encode';
@@ -27,7 +27,7 @@ const isolated = async (fn: (fact: Fact) => Promise<void>) => {
   let fact: null | Fact = null;
   try {
     
-    fact = await rootFact.kid([ import.meta.dirname, '.isolatedTest' ], { newTx: true });
+    fact = await rootFact.kid([ import.meta.dirname, '.isolated' ], { newTx: true });
     await fn(fact);
     
   } finally {
@@ -148,6 +148,12 @@ testRunner([
     // which is a number, to call `JsfnUtility.prototype.helperFn`, which returns `a.repeat(b)`
     
     const lbd = new MyLambda({
+      soil: {
+        getRegion: () => 'ca-central-1'
+      } as any,
+      context: {
+        pfx: 'testlilaclambdasourcecodegen'
+      } as any,
       name: 'myLbd',
       baseUrl: import.meta.url,
       memoryMb: 128,
@@ -161,19 +167,7 @@ testRunner([
       env: {}
     });
     
-    const script = await lbd.getScript({
-      ctx: {
-        name:      'test',
-        logger:    new Logger('test'),
-        fact:      rootFact.kid([ import.meta.dirname, 'infra' ]),
-        patioFact: rootFact.kid([ import.meta.dirname, 'infra', 'patio' ]),
-        shedFact:  tempFact.kid([ '@gershy' ]),
-        maturity: 'm0',
-        debug: true,
-        pfx: 'test'
-      },
-      lang: 'js'
-    });
+    const script = await lbd.getScript({ lang: 'js' });
     
     const require = (term: string) => {
       if (term === '@gershy/clearing') return null;                                           // Clearing not necessary - already loaded!
@@ -216,7 +210,7 @@ testRunner([
     
     logger.log({ $$: 'launch' });
     
-    const registry = new Registry({
+    const seedBank = new SeedBank({
       MyLambda: { real: MyLambda, test: MyLambda }
     });
     
@@ -232,14 +226,15 @@ testRunner([
       maturity: 'm0',
       debug: false,
       pfx: 'tezzzt',
+      progressiveServiceMap: {}
     };
     
     const garden = new Garden({
       context,
-      registry,
-      define: function*(ctx, registry) {
+      seedBank,
+      define: function*(ctx, seedBank) {
         
-        yield new registry.MyLambda({
+        yield new seedBank.MyLambda({
           name: 'test',
           memoryMb: 1024,
           localData: {
@@ -265,7 +260,7 @@ testRunner([
       }
     });
     
-    const soil = new Soil.LocalStack({ logger, aws: { region: 'ca-central-1' }, registry });
+    const soil = new Soil.LocalStack({ logger, aws: { region: 'ca-central-1' }, seedBank: seedBank });
     const localStack = await soil.run();
     void localStack;
     
@@ -276,8 +271,8 @@ testRunner([
       
       const lambdaClient = new LambdaClient({
         region: 'ca-central-1',
-        endpoint: process.env.LOCALSTACK_URL ?? 'http://127.0.0.1:4566',
-        credentials: { accessKeyId: 'test', secretAccessKey: 'test' }
+        endpoint: process.env.LOCALSTACK_URL ?? 'http://127.0.0.1:4566'
+        // credentials: { accessKeyId: 'test', secretAccessKey: 'test' }
       });
       const awsLbd = await lambdaClient.send(new ListFunctionsCommand({}))
         .then(listed => (listed.Functions ?? []).find(f => (f.FunctionName ?? '').includes('tezzzt')));

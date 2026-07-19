@@ -1,5 +1,5 @@
 import '@gershy/clearing';
-import { type Context, Flower, PetalTerraform, Soil } from '@gershy/lilac';
+import { type AwsRegionTerm, type Context as LilacContext, type ServiceMap, Flower, PetalTerraform, Soil } from '@gershy/lilac';
 import Logger                                         from '@gershy/logger';
 import { Network }                                    from '@gershy/lilac-network';
 import slashEscape                                    from '@gershy/util-slash-escape';
@@ -12,6 +12,7 @@ import phrasing                                       from '@gershy/util-phrasin
 import type { Codec }                                 from '@gershy/util-codec-parse';
 import * as aws                                       from './util/aws.ts';
 import * as tf                                        from './util/terraform.ts';
+import * as awsTf                                     from './util/awsTerraform.ts';
 
 // TODO: The LambdaShape only includes *native* req/res; a codec transforms the native req into a
 // shape that is more convenient for implementors - but there are two aspects to this: the 1st is
@@ -47,7 +48,7 @@ export abstract class LambdaBase<
   LocalData extends Jsfn,          // Data provided to lambda by project
   LaunchData,                      // Arbitrary data initialized by lambda on cold-start
   Cdc extends Codec.Rec<any>,      // Codec for validating incoming invocation args
-  Env extends Obj<string>          // Environment vars (main use-case is for passing arbitrary infra values to lambda)
+  Env extends Obj<Json>            // Environment vars (main use-case is for passing arbitrary infra values to lambda)
 > extends Flower {
   
   static importTs = (v: null | string, p: string) => v ? `import ${v} from '${p}';` : `import '${p}';`;
@@ -64,6 +65,9 @@ export abstract class LambdaBase<
   
   static getAwsServices(): Soil.LocalStackAwsService[] { return [ 'lambda', 'iam', 'logs' ]; }
   
+  protected context:   LilacContext;
+  protected soil:      Soil.Base;
+  protected region:    AwsRegionTerm;
   protected memoryMb:  number;
   protected network:   null | Network;
   protected name:      string;
@@ -79,6 +83,9 @@ export abstract class LambdaBase<
   
   constructor(args: {
     
+    context?:  LilacContext,
+    soil?:     Soil.Base,
+    region?:   AwsRegionTerm,
     name:      string,
     memoryMb:  number,
     network?:  Network,
@@ -98,6 +105,13 @@ export abstract class LambdaBase<
     
     super();
     
+    if (!args.context) throw Error('context missing');
+    this.context = args.context;
+    
+    if (!args.soil) throw Error('soil missing');
+    this.soil = args.soil;
+    this.region = args.region ?? this.soil.getRegion();
+    
     this.memoryMb  = memoryMb;
     this.network   = args.network ?? null;
     this.name      = args.name;
@@ -110,6 +124,7 @@ export abstract class LambdaBase<
     
   }
   
+  public getRegion() { return this.region; }
   public getName() { return this.name; }
   
   public * getDependencies() {
@@ -146,25 +161,7 @@ export abstract class LambdaBase<
     return [ 'lambda.amazonaws.com' ];
   }
   
-  public getRolePetal(ctx: Context) {
-    
-    return new PetalTerraform.Resource('awsIamRole', this.name, {
-      name: `${ctx.pfx}-${this.name}`,
-      assumeRolePolicy: tf.json(aws.capitalKeys({
-        version: '2012-10-17',
-        statement: [
-          {
-            principal: { service: this.getPrincipalServices() },
-            effect: 'Allow',
-            action: 'sts:AssumeRole'
-          }
-        ]
-      }))
-    });
-    
-  }
-  
-  public async getScript(args: { ctx: Context, lang: 'ts' | 'js' }) {
+  public async getScript(args: { lang: 'ts' | 'js' }) {
     
     // What are all possible places code can live? The space of urls. But sometimes code is
     // referred to by a pointer other than a url - the most common way is with a *relative path*; a
@@ -410,18 +407,22 @@ export abstract class LambdaBase<
         lang: args.lang
       }),
       
-      `const codec = ${jsfn.codec.code};                                                         `,
-      `const localData = ${localData.code};                                                      `,
-      `const launchFn = ${jsfn.launchFn.code};                                                   `,
-      `const invokeFn = ${jsfn.invokeFn.code};                                                   `,
-      `const invokeWrapper = ${jsfn.invokeWrapper.code};                                         `,
-      `const mainFn = (${jsfn.getMainFn.code})({                                                 `,
-      `  jsfnImport: jsImp => Error('jsfn import failed')[cl.fire]({ import: jsImp }),           `,
-      `  name: '${slashEscape(this.name, `'`)}',                                                 `,
-      `  debug: ${args.ctx.debug ? 'true' : 'false'},                                            `,
-      `  codec: cl.inCls(codec, Function) ? codec() : codec,                                     `,
-      `  localData, invokeWrapper, launchFn, invokeFn,                                           `,
-      `});                                                                                       `,
+      // Set up lambda-scoped globals
+      `const lilacGlobal = JSON.parse(process.env.${phrasing('camel->snake', 'gershyLilac')} ?? '{}');`,
+      `process[Symbol.for('@gershy/lilac/serviceMap')] = lilacGlobal.serviceMap ?? {};        `,
+      
+      `const codec = ${jsfn.codec.code};                                                      `,
+      `const localData = ${localData.code};                                                   `,
+      `const launchFn = ${jsfn.launchFn.code};                                                `,
+      `const invokeFn = ${jsfn.invokeFn.code};                                                `,
+      `const invokeWrapper = ${jsfn.invokeWrapper.code};                                      `,
+      `const mainFn = (${jsfn.getMainFn.code})({                                              `,
+      `  jsfnImport: jsImp => Error('jsfn import failed')[cl.fire]({ import: jsImp }),        `,
+      `  name: '${slashEscape(this.name, `'`)}',                                              `,
+      `  debug: ${this.context.debug ? 'true' : 'false'},                                     `,
+      `  codec: cl.inCls(codec, Function) ? codec() : codec,                                  `,
+      `  localData, invokeWrapper, launchFn, invokeFn,                                        `,
+      `});                                                                                    `,
       
       {
         ts: 'export const handler = '   + `mainFn;`,
@@ -432,11 +433,11 @@ export abstract class LambdaBase<
     
   }
   
-  async getBundle(args: { ctx: Context, lang: 'ts' | 'js' }): Promise<{ script: string, packedCode: string, zippedCode: Buffer, hash: string }> {
+  async getBundle(args: { lang: 'ts' | 'js' }): Promise<{ script: string, packedCode: string, zippedCode: Buffer, hash: string }> {
     
     const script = await this.getScript(args);
     
-    const resolvedName = `${args.ctx.pfx}-${this.name}`;
+    const resolvedName = `${this.context.pfx}-${this.name}`;
     
     if (!this.baseUrl[cl.hasHead]('file:///'))
       throw Error('non-file bundle base url invalid')[cl.mod]({ baseUrl: this.baseUrl });
@@ -445,7 +446,7 @@ export abstract class LambdaBase<
     const dirFact = fileFact.par();
     
     const packedCode = await scriptBundle({
-      debug: args.ctx.debug,
+      debug: this.context.debug,
       platform: 'node/cjs',
       script,
       dirFact
@@ -472,20 +473,43 @@ export abstract class LambdaBase<
     
   }
   
-  async computePetals(ctx: Context & { soil: Soil.Base }) {
+  async cultivate(serviceMap: ServiceMap) {
     
-    const resolvedName = `${ctx.pfx}-${this.name}`;
+    // Store a representation of the full service map terraform (may contain terraform references)
+    this.env[cl.merge]({ gershyLilac: { serviceMap } });
     
-    const { script, packedCode, zippedCode, hash } = await this.getBundle({ ctx, lang: 'js' });
+  }
+  
+  async * computePetals(): Loopable<PetalTerraform.Base> {
+    
+    const resolvedName = `${this.context.pfx}-${this.name}`;
+    const regionProvider = awsTf.provider(this.soil.getRegion(), this.region);
+    
+    const { script, packedCode, zippedCode, hash } = await this.getBundle({ lang: 'js' });
     
     const { Resource, File } = PetalTerraform;
     const zipFile        = new File(`literal/lambda/${this.name}.js.zip`, zippedCode);
     const sourceCodeFile = new File(`literal/lambda/${this.name}.ts`,     script    ); // Consider removing; it's only for debug purposes
     const packedCodeFile = new File(`literal/lambda/${this.name}.js`,     packedCode); // Consider removing; it's only for debug purposes
+    yield* [ zipFile, sourceCodeFile, packedCodeFile ];
     
-    const role = this.getRolePetal(ctx);
+    const role = new Resource('awsIamRole', this.name, {
+      ...regionProvider,
+      name: `${this.context.pfx}-${this.name}`,
+      assumeRolePolicy: tf.json(aws.capitalKeys({
+        version: '2012-10-17',
+        statement: [
+          {
+            principal: { service: this.getPrincipalServices() },
+            effect: 'Allow',
+            action: 'sts:AssumeRole'
+          }
+        ]
+      }))
+    });
     const policy = new Resource('awsIamPolicy', this.name, {
-      name: `${ctx.pfx}-${this.name}`,
+      ...regionProvider,
+      name: `${this.context.pfx}-${this.name}`,
       policy: tf.json(aws.capitalKeys({
         version: '2012-10-17',
         statement: [
@@ -500,12 +524,15 @@ export abstract class LambdaBase<
       }))
     });
     const attach = new Resource('awsIamRolePolicyAttachment', this.name, {
-      // No need to insert context.stage here!
+      ...regionProvider,
       role:      role.ref('name'),
       policyArn: policy.ref('arn')
     });
+    yield* [ role, policy, attach ];
     
     const lambda = new Resource('awsLambdaFunction', this.name, {
+      
+      ...regionProvider,
       
       functionName: resolvedName,
       runtime:      'nodejs22.x',
@@ -517,7 +544,7 @@ export abstract class LambdaBase<
       
       ...(this.network && await (async () => {
         
-        const vpcEnts = await this.network!.getPetals(ctx);
+        const vpcEnts = await this.network!.getPetals();
         const subnets = vpcEnts.filter(v => v.getType() === 'awsSubnet');
         const securityGroup = vpcEnts.find(v => v.getType() === 'awsSecurityGroup')!;
         
@@ -537,10 +564,11 @@ export abstract class LambdaBase<
       },
       
       $environment: {
-        variables: this.env ?? {}
+        variables: (this.env ?? {})[cl.map](v => cl.isCls(v, String) ? v : { $$json: v })
       }
       
     });
+    yield lambda;
     
     // Need to extend lambda iam permissions for vpc setup
     const policyTfEnts = (() => {
@@ -550,7 +578,8 @@ export abstract class LambdaBase<
       if (this.network) {
         
         const policy = new Resource('awsIamPolicy', `${this.name}VpcPolicy`, {
-          name: `${ctx.pfx}-${this.name}Vpc`,
+          ...regionProvider,
+          name: `${this.context.pfx}-${this.name}Vpc`,
           policy: tf.json(aws.capitalKeys({ version: '2012-10-17', statement: [{
             effect: phrasing('camel->kamel', 'allow'),
             action: [
@@ -563,6 +592,7 @@ export abstract class LambdaBase<
         });
         
         const attachment = new Resource('awsIamRolePolicyAttachment', `${this.name}VpcPolicy`, {
+          ...regionProvider,
           role:      role.ref('name'),
           policyArn: policy.ref('arn')
         });
@@ -574,16 +604,19 @@ export abstract class LambdaBase<
       return policyTfEnts;
       
     })();
+    yield* policyTfEnts;
     
     // Note there is no infrastructural link between a lamda and its log group - we can customize a
     // lambda's log group by simply defining a log group with the correct name the lambda will try
     // to log to!
     const logGroup = new PetalTerraform.Resource('awsCloudwatchLogGroup', this.name, {
+      
+      ...regionProvider,
       name:            `/aws/lambda/${tf.embed(lambda.refStr('functionName'))}`,
       retentionInDays: 14
+      
     });
-    
-    return [ zipFile, sourceCodeFile, packedCodeFile, role, policy, attach, lambda, logGroup, ...policyTfEnts ];
+    yield logGroup;
     
   }
   
