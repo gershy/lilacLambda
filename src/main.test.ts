@@ -177,7 +177,7 @@ entry({ name: 'lilacLambda', codec, inp: { reg: '^', effort: 0 }, fn: async (log
         if (term === '@gershy/clearing') return null;                                           // Clearing not necessary - already loaded!
         if (term === '@gershy/logger') return { default: function() { return Logger.dummy; } }; // Silence lambda logs
         if (term === '@gershy/util-codec-parse') return { default: codecParse };                // Pass our codec parsing lib
-        if (term.endsWith('import.test.ts')) return { JsfnUtility };
+        if (term.split(/[/\\]/).slice(-2).join('/') === 'src/import.test.ts') return { JsfnUtility };
         throw Error('mock require unaware')[cl.mod]({ term });
       };
       const invoke = eval(String[cl.baseline](`
