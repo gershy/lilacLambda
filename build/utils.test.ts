@@ -1,11 +1,11 @@
 import '@gershy/clearing';
+import Logger from '@gershy/logger';
 
-const { skip, isCls, inCls, getCls, getClsName } = clearing;
+const { isCls, inCls, getCls, getClsName } = clearing;
 const count: typeof cl.count = cl.count;
 const toArr: typeof cl.toArr = cl.toArr;
 const has:   typeof cl.has   = cl.has;
 const mod:   typeof cl.mod   = cl.mod;
-const limn:  typeof cl.limn  = cl.limn;
 
 export const cmpAny  = Symbol('@gershy/test/cmp/any');
 export const cmpReg  = Symbol('@gershy/test/cmp/reg');
@@ -41,7 +41,7 @@ export const equal = (v0: any, v1: any, path: (string | number)[] = []): { equal
     const reg = v1[1] as RegExp;
     return reg.test(v0)
       ? { equal: true }
-      : { equal: false, path, reason: 'regex', regex: reg.toString() };
+      : { equal: false, path, reason: 'regex', regex: `/${reg.source}/`, str: v0 };
     
   }
   
@@ -155,6 +155,16 @@ export const equal = (v0: any, v1: any, path: (string | number)[] = []): { equal
     return equal({ $msg: v0.message, ...v0 }, { $msg: v1.message, ...v1 }, [ ...path, '<obj>' ]);
   }
   
+  if (inCls(v0, Function)) {
+    
+    return equal(
+      v0.toString().replace(/\s+/g, ' '),
+      v1.toString().replace(/\s+/g, ' '),
+      [ ...path, '<str>' ]
+    );
+    
+  }
+  
   return { equal: false, path, reason: 'unknown comparison', cls: getClsName(v0) };
   
 };
@@ -165,25 +175,42 @@ export const assertEqual = (v0: any, v1: any) => {
   if (!eq) throw Error('assert equal')[mod]({ ...props });
   
 };
-export const testRunner = async (rawCases: { name: string, fn: () => Promise<void> }[]) => {
+type Effort = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+type TestRunnerInp<Inp> = {
+  logger?: Logger,
+  reg?: RegExp,
+  effort?: Effort,
+  inp: Inp,
+  cases: { name: string, effort?: Effort, fn: (logger: Logger, inp: Inp) => Promise<void> }[]
+};
+export const testRunner = async <Inp = null>(inp: TestRunnerInp<Inp>) => {
   
-  const regStr = skip
-    ?? process.argv.find(v => v.at(0) === '/' && v.at(-1) === '/')
-    ?? '/(?:)/';
-  const reg = new RegExp(regStr.slice('/'.length, -'/'.length));
+  const logger = inp.logger ?? Logger.dummy;
+  const reg = inp.reg ?? /^/;
+  const effort = inp.effort ?? 0;
+  const testInp = (inp.inp ?? null) as Inp;
   
-  const cases = rawCases.filter(c => reg.test(c.name));
-  const num = cases.length;
-  const tot = rawCases.length;
-  if (num === 0) { console.log('Nothing to test'); return; }
-  
-  console.log(`Launch ${num} test(${num === 1 ? '' : 's'})`);
-  
-  for (const { name, fn } of cases)
-    try              { await fn(); }
-    catch (err: any) { console.log(`FAILED: "${name}"`, err[limn]()); process.exit(1); }
-  
-  console.log(`Accept ${num} test(${num === 1 ? '' : 's'})`);
-  if (num !== tot) console.log(`(Out of ${tot} total tests)`);
+  const { cases } = inp;
+  // const cases = inp.cases.filter(c => reg.test(c.name) && (c.effort ?? 0) <= effort);
+  // const num = cases.length;
+  // const tot = inp.cases.length;
+  await logger.scope('tests', { num: cases.length, effort, reg: `/${reg.source}/` }, async logger => {
+    
+    let numRan = 0;
+    for (const [ n, c ] of cases.entries()) await logger.scope(n.toString(), { name: c.name, effort: c.effort ?? 0 }, async logger => {
+      
+      if (!reg.test(c.name) || (c.effort ?? 0) > effort) {
+        logger.log({ $$: 'skipped' });
+        return;
+      }
+      
+      numRan++;
+      await c.fn(logger, testInp);
+      
+    });
+    
+    logger.log({ $$: 'result', completedTests: numRan });
+    
+  });
   
 };

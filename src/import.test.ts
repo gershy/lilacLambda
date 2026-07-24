@@ -8,7 +8,7 @@ export class JsfnUtility {
     return this.a.repeat(args.b);
   }
   toJsfn() {
-    return { hoist: `${import.meta.dirname}::{JsfnUtility}` as const, form: this.constructor, args: [ { a: this.a } ] };
+    return { hoist: `${import.meta.filename}::{JsfnUtility}` as const, form: this.constructor, args: [ { a: this.a } ] };
   }
   
 };

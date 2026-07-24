@@ -77,30 +77,30 @@ export abstract class LambdaBase<
   protected localData: ((lbd: AnyLambda) => Promise<LocalData>) | Promise<LocalData> | ((lbd: AnyLambda) => LocalData) | LocalData;
   protected codec:     Cdc;
   protected baseUrl:   string;
-  protected launchFn:  (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, localData: LocalData }) => LaunchData;
-  protected invokeFn:  (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, launchData: LaunchData, shapeData: Pick<Shape, 'ctx' | 'req'>, args: Codec.Out<Cdc> }) => Res;
+  protected launchFn:  null | ((ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, localData: LocalData }) => LaunchData);
+  protected invokeFn:         ((ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, launchData: LaunchData, shapeData: Pick<Shape, 'ctx' | 'req'>, args: Codec.Out<Cdc> }) => Res);
   protected env:       Env;
   
   constructor(args: {
     
-    context?:  LilacContext,
-    soil?:     Soil.Base,
-    region?:   AwsRegionTerm,
-    name:      string,
-    memoryMb:  number,
-    network?:  Network,
-    localData: ((lambda: LambdaBase<any, any, any, any, any, any>) => Promise<LocalData>) | Promise<LocalData> | (() => LocalData) | LocalData;
-    codec:     Cdc,
-    baseUrl:   string,
-    launchFn:  (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, localData: LocalData }) => LaunchData,
-    invokeFn:  (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, shapeData: Pick<Shape, 'ctx' | 'req'>, launchData: LaunchData, args: Codec.Out<Cdc> }) => Res,
-    env:       Env
+    context?:   LilacContext,
+    soil?:      Soil.Base,
+    region?:    AwsRegionTerm,
+    name:       string,
+    memoryMb?:  number,
+    network?:   Network,
+    localData?: ((lambda?: LambdaBase<any, any, any, any, any, any>) => Promise<LocalData>) | Promise<LocalData> | LocalData;
+    codec?:     Cdc,
+    baseUrl:    string,
+    launchFn?:  (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, localData: LocalData }) => LaunchData,
+    invokeFn:   (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, shapeData: Pick<Shape, 'ctx' | 'req'>, launchData: LaunchData, args: Codec.Out<Cdc> }) => Res,
+    env?:       Env
     
   }) {
     
     if (!/^[a-z][a-zA-Z0-9]*$/.test(args.name)) throw Error('invalid name')[cl.mod]({ args });
     
-    const memoryMb = args.memoryMb ?? 2048;
+    const memoryMb = args.memoryMb ?? 128;
     if (memoryMb < 128 || memoryMb > 10240 || Math.floor(memoryMb) != memoryMb) throw Error('memory mb invalid')[cl.mod]({ memoryMb });
     
     super();
@@ -115,12 +115,12 @@ export abstract class LambdaBase<
     this.memoryMb  = memoryMb;
     this.network   = args.network ?? null;
     this.name      = args.name;
-    this.localData = args.localData;
-    this.codec     = args.codec;
+    this.localData = args.localData ?? (null as any);
+    this.codec     = args.codec     ?? ({ type: 'rec', loose: true, props: {} } as any);
     this.baseUrl   = args.baseUrl;
-    this.launchFn  = args.launchFn;
+    this.launchFn  = args.launchFn ?? null;
     this.invokeFn  = args.invokeFn;
-    this.env       = args.env;
+    this.env       = args.env ?? ({} as any);
     
   }
   
@@ -192,12 +192,57 @@ export abstract class LambdaBase<
     // Compiling js vs ts is very simple; the logic to generate an import statement is the only
     // thing that varies depending on the language!
     
-    const localData = jsfnEncode({ baseUrl: this.baseUrl, val: await this.getLocalData() });
+    type InvokeWrapper = ReturnType<typeof this.getInvokeWrapper>;
+    type LaunchFn = typeof this.launchFn;
+    type InvokeFn = typeof this.invokeFn;
+    type MainArgs = {
+      jsfnImport:    <S extends string>(fp: S) => any, // import(S)
+      name:          string,
+      debug:         boolean,
+      localData:     LocalData,
+      invokeWrapper: InvokeWrapper,
+      launchFn:      LaunchFn,
+      codec:         Cdc,
+      invokeFn:      InvokeFn
+    };
+    const jsfn = {
+      
+      // Note how codec merging works - we want to allow the consumer to avoid defining codecs for
+      // "generic" argument components, e.g. headers, cookies, but with the ability to expect
+      // certain values from them if necessary, e.g. requiring a header in a specific format
+      codec:          jsfnEncode({ baseUrl: this.baseUrl,    val: this.codec                }),
+      localData:      jsfnEncode({ baseUrl: this.baseUrl,    val: await this.getLocalData() }),
+      launchFn:       jsfnEncode({ baseUrl: this.baseUrl,    val: this.launchFn             }),
+      invokeFn:       jsfnEncode({ baseUrl: this.baseUrl,    val: this.invokeFn             }),
+      invokeWrapper:  jsfnEncode({ baseUrl: import.meta.url, val: this.getInvokeWrapper()   }),
+      getMainFn:      jsfnEncode({ baseUrl: import.meta.url, val: (args: MainArgs) => {
+        
+        const { default: Logger } = args.jsfnImport('@gershy/logger') as typeof import('@gershy/logger');
+        
+        const { jsfnImport, name, debug, localData, invokeWrapper, codec, launchFn, invokeFn } = args;
+        
+        const logger = new Logger('lambda', {}, { maxStrLen: 500 });
+        logger.log({ $$: 'launch', name });
+        
+        const launchData = logger.scope('supplies', {}, logger => launchFn?.({ debug, logger, jsfnImport, localData }) ?? (null as LaunchData)); // If no `launchFn` provided, we pass `null`; we could pass anything - it's unknown from the consumer's perspective!
+        const invokeArgs = {
+          debug,
+          logger,
+          launchData,
+          jsfnImport,
+          codec,
+          invokeFn
+        };
+        return (req: Shape['req'], ctx: Shape['ctx']) => invokeWrapper({ ...invokeArgs, shapeData: { req, ctx } });
+        
+      }})
+      
+    } satisfies Obj<{ jsImports: JsImport[], code: string }>;
     
     // Validate the vpc won't block access to any hoists!
     if (this.network) {
       
-      const { jsImports } = localData;
+      const { jsImports } = jsfn.localData;
       
       // TODO: This is very brittle - relies on the consumer using a particular naming scheme for
       // their js import variables - should at least convert to checking module names, i.e.
@@ -224,52 +269,6 @@ export abstract class LambdaBase<
       }
       
     }
-    
-    type InvokeWrapper = ReturnType<typeof this.getInvokeWrapper>;
-    type LaunchFn = typeof this.launchFn;
-    type InvokeFn = typeof this.invokeFn;
-    type MainArgs = {
-      jsfnImport:    <S extends string>(fp: S) => any, // import(S)
-      name:          string,
-      debug:         boolean,
-      localData:     LocalData,
-      invokeWrapper: InvokeWrapper,
-      launchFn:      LaunchFn,
-      codec:         Cdc,
-      invokeFn:      InvokeFn
-    };
-    const jsfn = {
-      
-      // Note how codec merging works - we want to allow the consumer to avoid defining codecs for
-      // "generic" argument components, e.g. headers, cookies, but with the ability to expect
-      // certain values from them if necessary, e.g. requiring a header in a specific format
-      codec:          jsfnEncode({ baseUrl: this.baseUrl,    val: this.codec               }),
-      launchFn:       jsfnEncode({ baseUrl: this.baseUrl,    val: this.launchFn            }),
-      invokeFn:       jsfnEncode({ baseUrl: this.baseUrl,    val: this.invokeFn            }),
-      invokeWrapper:  jsfnEncode({ baseUrl: import.meta.url, val: this.getInvokeWrapper()  }),
-      getMainFn:      jsfnEncode({ baseUrl: import.meta.url, val: (args: MainArgs) => {
-        
-        const { default: Logger } = args.jsfnImport('@gershy/logger') as typeof import('@gershy/logger');
-        
-        const { jsfnImport, name, debug, localData, invokeWrapper, codec, launchFn, invokeFn } = args;
-        
-        const logger = new Logger('lambda');
-        logger.log({ $$: 'launch', name });
-        
-        const launchData = logger.scope('supplies', {}, logger => launchFn({ debug, logger, jsfnImport, localData }));
-        const invokeArgs = {
-          debug,
-          logger,
-          launchData,
-          jsfnImport,
-          codec,
-          invokeFn
-        };
-        return (req: Shape['req'], ctx: Shape['ctx']) => invokeWrapper({ ...invokeArgs, shapeData: { req, ctx } });
-        
-      }})
-      
-    } satisfies Obj<{ jsImports: JsImport[], code: string }>;
     
     const mergeJsImports = (jsImports: JsImport[]) => {
       
@@ -322,9 +321,10 @@ export abstract class LambdaBase<
           
           const hasFull = !full[cl.empty]();
           const hasNamed = !named[cl.empty]();
+          const importStr = `'${slashEscape(importPath, `'`)}'`;
           
           if (!hasFull && !hasNamed) {
-            imports.push(`require('${importPath}');`);
+            imports.push(`require(${importStr});`);
             continue;
           }
           
@@ -332,7 +332,7 @@ export abstract class LambdaBase<
             
             const [ v, ...more ] = full;
             imports.push(...[
-              `const ${v} = require('${importPath}');`,
+              `const ${v} = require(${importStr});`,
               ...more.map(m => `const ${m} = ${v};`)
             ]);
             
@@ -347,7 +347,7 @@ export abstract class LambdaBase<
               named
                 [cl.toArr]((aliases, k) => aliases.map(a => a !== k ? `${k}: ${a}` : k))
                 .flat(1)
-            } } = require('${importPath}');`);
+            } } = require(${importStr});`);
             
           }
           
@@ -359,10 +359,10 @@ export abstract class LambdaBase<
           
           const hasFull = !full[cl.empty]();
           const hasNamed = !named[cl.empty]();
-          
+          const importStr = `'${slashEscape(importPath, `'`)}'`;
           
           if (!hasFull && !hasNamed) {
-            imports.push(`import '${importPath}';`);
+            imports.push(`import ${importStr};`);
             continue;
           }
           
@@ -370,7 +370,7 @@ export abstract class LambdaBase<
             
             const [ v, ...more ] = full;
             imports.push(...[
-              `import ${v} from '${importPath}';`,
+              `import ${v} from ${importStr};`,
               ...more.map(m => `const ${m} = ${v};`)
             ]);
             
@@ -385,7 +385,7 @@ export abstract class LambdaBase<
               named
                 [cl.toArr]((aliases, k) => aliases.map(a => a !== k ? `${k} as ${a}` : k))
                 .flat(1)
-            } } from '${importPath}';`);
+            } } from ${importStr};`);
             
           }
           
@@ -402,7 +402,7 @@ export abstract class LambdaBase<
       ...getImports({
         mergedImports: mergeJsImports([
           { varDef: null, importPath: '@gershy/clearing' }, // Ensure clearing is imported
-          ...jsfn[cl.toArr](v => v.jsImports).flat(1)
+          ...jsfn[cl.toArr](v => v.jsImports).flat(1),
         ]),
         lang: args.lang
       }),
@@ -412,7 +412,7 @@ export abstract class LambdaBase<
       `process[Symbol.for('@gershy/lilac/serviceMap')] = lilacGlobal.serviceMap ?? {};        `,
       
       `const codec = ${jsfn.codec.code};                                                      `,
-      `const localData = ${localData.code};                                                   `,
+      `const localData = ${jsfn.localData.code};                                                   `,
       `const launchFn = ${jsfn.launchFn.code};                                                `,
       `const invokeFn = ${jsfn.invokeFn.code};                                                `,
       `const invokeWrapper = ${jsfn.invokeWrapper.code};                                      `,
