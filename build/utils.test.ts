@@ -194,22 +194,20 @@ export const testRunner = async <Inp = null>(inp: TestRunnerInp<Inp>) => {
   // const cases = inp.cases.filter(c => reg.test(c.name) && (c.effort ?? 0) <= effort);
   // const num = cases.length;
   // const tot = inp.cases.length;
-  await logger.scope('tests', { num: cases.length, effort, reg: `/${reg.source}/` }, async logger => {
+  await logger.scope('tests', { effort, reg: `/${reg.source}/` }, async logger => {
     
     let numRan = 0;
     for (const [ n, c ] of cases.entries()) await logger.scope(n.toString(), { name: c.name, effort: c.effort ?? 0 }, async logger => {
       
-      if (!reg.test(c.name) || (c.effort ?? 0) > effort) {
-        logger.log({ $$: 'skipped' });
-        return;
-      }
+      if (!reg.test(c.name))        { logger.log({ $$: 'skipped', name: c.name, reg: `/${reg.source}/`     }); return; }
+      if ((c.effort ?? 0) > effort) { logger.log({ $$: 'skipped', effort: c.effort ?? 0, maxEffort: effort }); return; }
       
       numRan++;
       await c.fn(logger, testInp);
       
     });
     
-    logger.log({ $$: 'result', completedTests: numRan });
+    logger.log({ $$: 'result', completedTests: numRan, totalTests: cases.length });
     
   });
   

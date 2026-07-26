@@ -212,15 +212,11 @@ entry({ name: 'lilacLambda', codec, inp: { reg: '^', effort: 0 }, fn: async (log
         MyLambda: { real: MyLambda, test: MyLambda }
       });
       
-      const shedFact = tempFact.kid([ '@gershy' ]);
-      const patioFact = fact.kid([ 'repo', 'patio' ]);
-      const gardenFact = fact.kid([ 'repo', 'terraform' ]);
-      
       const garden = new Garden({
         name: 'hi',
-        fact: gardenFact,
-        patioFact,
-        shedFact,
+        infraFact: fact.kid([ 'repo', 'terraform' ]),
+        patioFact: tempFact.kid([ '@gershy' ]),
+        shedFact: fact.kid([ 'repo', 'patio' ]),
         logger,
         debug: false,
         pfx: 'tezzzt',
@@ -243,7 +239,7 @@ entry({ name: 'lilacLambda', codec, inp: { reg: '^', effort: 0 }, fn: async (log
         }
       });
       
-      const soil = new Soil.LocalStack({ logger, aws: { region: 'ca-central-1' }, seedBank: seedBank });
+      const soil = new Soil.LocalStack({ logger, garden });
       const localStack = await soil.run();
       void localStack;
       
@@ -323,7 +319,6 @@ entry({ name: 'lilacLambda', codec, inp: { reg: '^', effort: 0 }, fn: async (log
   ]});
   
 }});
-
 
 /*
 shaina loves you very much like so much 
