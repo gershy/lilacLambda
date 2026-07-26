@@ -4,7 +4,7 @@ import { LambdaBase } from './main.ts';
 import Logger from '@gershy/logger';
 import { Fact, rootFact, tempFact } from '@gershy/disk';
 import codecParse, { type Codec } from '@gershy/util-codec-parse';
-import { Garden, SeedBank, Soil, type Context } from '@gershy/lilac';
+import { Garden, SeedBank, Soil } from '@gershy/lilac';
 import { InvokeCommand, LambdaClient, ListFunctionsCommand } from '@aws-sdk/client-lambda';
 import type { Jsfn } from '@gershy/util-jsfn-encode';
 import { JsfnUtility } from './import.test.ts';
@@ -28,7 +28,7 @@ entry({ name: 'lilacLambda', codec, inp: { reg: '^', effort: 0 }, fn: async (log
     if (0) ((v?: Tests) => void 0)();
     
   })();
-
+  
   const isolated = async (fn: (fact: Fact) => Promise<void>) => {
     
     let fact: null | Fact = null;
@@ -152,12 +152,7 @@ entry({ name: 'lilacLambda', codec, inp: { reg: '^', effort: 0 }, fn: async (log
       // which is a number, to call `JsfnUtility.prototype.helperFn`, which returns `a.repeat(b)`
       
       const lbd = new MyLambda({
-        soil: {
-          getRegion: () => 'ca-central-1'
-        } as any,
-        context: {
-          pfx: 'testlilaclambdasourcecodegen'
-        } as any,
+        garden: { defaults: { region: 'ca-central-1' } } as any,
         name: 'myLbd',
         baseUrl: import.meta.url,
         memoryMb: 128,
@@ -220,45 +215,30 @@ entry({ name: 'lilacLambda', codec, inp: { reg: '^', effort: 0 }, fn: async (log
       const shedFact = tempFact.kid([ '@gershy' ]);
       const patioFact = fact.kid([ 'repo', 'patio' ]);
       const gardenFact = fact.kid([ 'repo', 'terraform' ]);
-      const context: Context = {
+      
+      const garden = new Garden({
         name: 'hi',
         fact: gardenFact,
         patioFact,
         shedFact,
         logger,
-        maturity: 'm0',
         debug: false,
         pfx: 'tezzzt',
-        progressiveServiceMap: {}
-      };
-      
-      const garden = new Garden({
-        context,
         seedBank,
-        define: function*(ctx, seedBank) {
+        survey: (garden, seedBank, add) => {
           
-          yield new seedBank.MyLambda({
+          add(new seedBank.MyLambda({
             name: 'test',
-            memoryMb: 1024,
             localData: {
               fn1: (a: string, b: number) => 'z'.repeat(b).split('').join(a)
             },
             codec: { type: 'rec', props: { a: { type: 'str' }, b: { type: 'num' } } } as const,
             baseUrl: import.meta.url,
-            launchFn: ctx => {
-              return { fn2: (a: string, b: number) => ctx.localData.fn1(`(${a})`, b) };
-            },
-            invokeFn: ctx => {
-              
-              const { a, b } = ctx.args;
-              return ctx.launchData.fn2(a, b);
-              
-              // Not an http response - can be either Json or binary response - TODO: think about how
-              // the typing can tighten the response! Currently it can be `any`...
-              
-            },
+            launchFn: ctx => ({ fn2: (a: string, b: number) => ctx.localData.fn1(`(${a})`, b) }),
+            // Not an http response - can be either Json or binary response
+            invokeFn: ctx => ctx.launchData.fn2(ctx.args.a, ctx.args.b),
             env: {}
-          });
+          }));
           
         }
       });
@@ -299,7 +279,7 @@ entry({ name: 'lilacLambda', codec, inp: { reg: '^', effort: 0 }, fn: async (log
           callbackWaitsForEmptyEventLoop: true,
           functionVersion: '$LATEST',
           functionName: 'tezzzt-test',
-          memoryLimitInMB: '1024',
+          memoryLimitInMB: '128',
           awsRequestId: cmpAny,
           logGroupName: cmpAny,
           logStreamName: [ cmpReg, /^[0-9]{4}[/][0-9]{2}[/][0-9]{2}/ ],

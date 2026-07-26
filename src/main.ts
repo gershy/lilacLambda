@@ -1,5 +1,5 @@
 import '@gershy/clearing';
-import { type AwsRegionTerm, type Context as LilacContext, type ServiceMap, Flower, PetalTerraform, Soil } from '@gershy/lilac';
+import { type AwsRegionTerm, type Garden, type ServiceMap, Flower, PetalTerraform, Soil } from '@gershy/lilac';
 import Logger                                         from '@gershy/logger';
 import { Network }                                    from '@gershy/lilac-network';
 import slashEscape                                    from '@gershy/util-slash-escape';
@@ -65,8 +65,6 @@ export abstract class LambdaBase<
   
   static getAwsServices(): Soil.LocalStackAwsService[] { return [ 'lambda', 'iam', 'logs' ]; }
   
-  protected context:   LilacContext;
-  protected soil:      Soil.Base;
   protected region:    AwsRegionTerm;
   protected memoryMb:  number;
   protected network:   null | Network;
@@ -83,9 +81,8 @@ export abstract class LambdaBase<
   
   constructor(args: {
     
-    context?:   LilacContext,
-    soil?:      Soil.Base,
-    region?:    AwsRegionTerm,
+    garden?:    Garden<any, any>,
+    region?:    string,
     name:       string,
     memoryMb?:  number,
     network?:   Network,
@@ -103,14 +100,10 @@ export abstract class LambdaBase<
     const memoryMb = args.memoryMb ?? 128;
     if (memoryMb < 128 || memoryMb > 10240 || Math.floor(memoryMb) != memoryMb) throw Error('memory mb invalid')[cl.mod]({ memoryMb });
     
-    super();
+    super(args);
     
-    if (!args.context) throw Error('context missing');
-    this.context = args.context;
-    
-    if (!args.soil) throw Error('soil missing');
-    this.soil = args.soil;
-    this.region = args.region ?? this.soil.getRegion();
+    this.region = args.region ?? this.garden.defaults.region ?? null;
+    if (!this.region) throw Error('region missing');
     
     this.memoryMb  = memoryMb;
     this.network   = args.network ?? null;
@@ -419,7 +412,7 @@ export abstract class LambdaBase<
       `const mainFn = (${jsfn.getMainFn.code})({                                              `,
       `  jsfnImport: jsImp => Error('jsfn import failed')[cl.fire]({ import: jsImp }),        `,
       `  name: '${slashEscape(this.name, `'`)}',                                              `,
-      `  debug: ${this.context.debug ? 'true' : 'false'},                                     `,
+      `  debug: ${this.garden.debug ? 'true' : 'false'},                                     `,
       `  codec: cl.inCls(codec, Function) ? codec() : codec,                                  `,
       `  localData, invokeWrapper, launchFn, invokeFn,                                        `,
       `});                                                                                    `,
@@ -437,7 +430,7 @@ export abstract class LambdaBase<
     
     const script = await this.getScript(args);
     
-    const resolvedName = `${this.context.pfx}-${this.name}`;
+    const resolvedName = `${this.garden.pfx}-${this.name}`;
     
     if (!this.baseUrl[cl.hasHead]('file:///'))
       throw Error('non-file bundle base url invalid')[cl.mod]({ baseUrl: this.baseUrl });
@@ -446,7 +439,7 @@ export abstract class LambdaBase<
     const dirFact = fileFact.par();
     
     const packedCode = await scriptBundle({
-      debug: this.context.debug,
+      debug: this.garden.debug,
       platform: 'node/cjs',
       script,
       dirFact
@@ -482,8 +475,8 @@ export abstract class LambdaBase<
   
   async * computePetals(): Loopable<PetalTerraform.Base> {
     
-    const resolvedName = `${this.context.pfx}-${this.name}`;
-    const regionProvider = awsTf.provider(this.soil.getRegion(), this.region);
+    const resolvedName = `${this.garden.pfx}-${this.name}`;
+    const regionProvider = awsTf.provider(this.garden.defaults.region, this.region);
     
     const { script, packedCode, zippedCode, hash } = await this.getBundle({ lang: 'js' });
     
@@ -495,7 +488,7 @@ export abstract class LambdaBase<
     
     const role = new Resource('awsIamRole', this.name, {
       ...regionProvider,
-      name: `${this.context.pfx}-${this.name}`,
+      name: `${this.garden.pfx}-${this.name}`,
       assumeRolePolicy: tf.json(aws.capitalKeys({
         version: '2012-10-17',
         statement: [
@@ -509,7 +502,7 @@ export abstract class LambdaBase<
     });
     const policy = new Resource('awsIamPolicy', this.name, {
       ...regionProvider,
-      name: `${this.context.pfx}-${this.name}`,
+      name: `${this.garden.pfx}-${this.name}`,
       policy: tf.json(aws.capitalKeys({
         version: '2012-10-17',
         statement: [
@@ -579,7 +572,7 @@ export abstract class LambdaBase<
         
         const policy = new Resource('awsIamPolicy', `${this.name}VpcPolicy`, {
           ...regionProvider,
-          name: `${this.context.pfx}-${this.name}Vpc`,
+          name: `${this.garden.pfx}-${this.name}Vpc`,
           policy: tf.json(aws.capitalKeys({ version: '2012-10-17', statement: [{
             effect: phrasing('camel->kamel', 'allow'),
             action: [
