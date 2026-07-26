@@ -213,13 +213,13 @@ entry({ name: 'lilacLambda', codec, inp: { reg: '^', effort: 0 }, fn: async (log
       });
       
       const garden = new Garden({
-        name: 'hi',
+        term: 'hi',
         infraFact: fact.kid([ 'repo', 'terraform' ]),
         patioFact: tempFact.kid([ '@gershy' ]),
         shedFact: fact.kid([ 'repo', 'patio' ]),
         logger,
         debug: false,
-        pfx: 'tezzzt',
+        pfx: 'lilaclambdatest',
         seedBank,
         survey: (garden, seedBank, add) => {
           
@@ -254,7 +254,7 @@ entry({ name: 'lilacLambda', codec, inp: { reg: '^', effort: 0 }, fn: async (log
           // credentials: { accessKeyId: 'test', secretAccessKey: 'test' }
         });
         const awsLbd = await lambdaClient.send(new ListFunctionsCommand({}))
-          .then(listed => (listed.Functions ?? []).find(f => (f.FunctionName ?? '').includes('tezzzt')));
+          .then(listed => (listed.Functions ?? []).find(f => (f.FunctionName ?? '').includes('lilaclambdatest')));
         if (!awsLbd) throw Error('lambda missing');
         
         const invoke = async (args: any) => {
@@ -274,12 +274,12 @@ entry({ name: 'lilacLambda', codec, inp: { reg: '^', effort: 0 }, fn: async (log
         const assertCtx = {
           callbackWaitsForEmptyEventLoop: true,
           functionVersion: '$LATEST',
-          functionName: 'tezzzt-test',
+          functionName: 'lilaclambdatest-test',
           memoryLimitInMB: '128',
           awsRequestId: cmpAny,
           logGroupName: cmpAny,
           logStreamName: [ cmpReg, /^[0-9]{4}[/][0-9]{2}[/][0-9]{2}/ ],
-          invokedFunctionArn: [ cmpReg, /^arn:aws:lambda:ca-central-1:[0-9]{12}:function:tezzzt-test/ ],
+          invokedFunctionArn: [ cmpReg, /^arn:aws:lambda:ca-central-1:[0-9]{12}:function:lilaclambdatest-test/ ],
         };
         
         assertEqual(
