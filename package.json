@@ -18,22 +18,22 @@
   ],
   "license": "ISC",
   "peerDependencies": {
-    "@gershy/clearing": "^0.0.52"
+    "@gershy/clearing": "^0.0.53"
   },
   "devDependencies": {
-    "@gershy/entry": "^0.0.22",
+    "@gershy/entry": "^0.0.23",
     "@types/node": "^24.10.1"
   },
   "dependencies": {
-    "@gershy/lilac": "^0.0.51",
-    "@gershy/lilac-network": "^0.0.25",
-    "@gershy/logger": "^0.0.20",
-    "@gershy/script-bundle": "^0.0.17",
-    "@gershy/util-codec-parse": "^0.0.20",
-    "@gershy/util-hash": "^0.0.25",
-    "@gershy/util-jsfn-encode": "^0.0.18",
-    "@gershy/util-phrasing": "^0.0.18",
-    "@gershy/util-slash-escape": "^0.0.14",
+    "@gershy/lilac": "^0.0.52",
+    "@gershy/lilac-network": "^0.0.26",
+    "@gershy/logger": "^0.0.21",
+    "@gershy/script-bundle": "^0.0.18",
+    "@gershy/util-codec-parse": "^0.0.21",
+    "@gershy/util-hash": "^0.0.26",
+    "@gershy/util-jsfn-encode": "^0.0.19",
+    "@gershy/util-phrasing": "^0.0.19",
+    "@gershy/util-slash-escape": "^0.0.15",
     "@aws-sdk/client-lambda": "^3.1045.0",
     "jszip": "^3.10.1"
   },
