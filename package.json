@@ -1,39 +1,39 @@
 {
   "name": "@gershy/lilac-lambda",
-  "version": "0.0.26",
+  "version": "0.0.27",
   "author": "Gershom Maes",
   "description": "Lilac lambda function flower",
   "keywords": [],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gershy/lilacLambda.git"
+    "url": "git+https://github.com/gershyNpm/lilacLambda.git"
   },
   "bugs": {
-    "url": "https://github.com/gershy/lilacLambda/issues"
+    "url": "https://github.com/gershyNpm/lilacLambda/issues"
   },
-  "homepage": "https://github.com/gershy/lilacLambda#readme",
+  "homepage": "https://github.com/gershyNpm/lilacLambda#readme",
   "type": "module",
   "files": [
     "cmp"
   ],
   "license": "ISC",
   "peerDependencies": {
-    "@gershy/clearing": "^0.0.51"
+    "@gershy/clearing": "^0.0.52"
   },
   "devDependencies": {
-    "@gershy/entry": "^0.0.21",
+    "@gershy/entry": "^0.0.22",
     "@types/node": "^24.10.1"
   },
   "dependencies": {
-    "@gershy/lilac": "^0.0.50",
-    "@gershy/lilac-network": "^0.0.24",
-    "@gershy/logger": "^0.0.19",
-    "@gershy/script-bundle": "^0.0.16",
-    "@gershy/util-codec-parse": "^0.0.19",
-    "@gershy/util-hash": "^0.0.24",
-    "@gershy/util-jsfn-encode": "^0.0.16",
-    "@gershy/util-phrasing": "^0.0.17",
-    "@gershy/util-slash-escape": "^0.0.13",
+    "@gershy/lilac": "^0.0.51",
+    "@gershy/lilac-network": "^0.0.25",
+    "@gershy/logger": "^0.0.20",
+    "@gershy/script-bundle": "^0.0.17",
+    "@gershy/util-codec-parse": "^0.0.20",
+    "@gershy/util-hash": "^0.0.25",
+    "@gershy/util-jsfn-encode": "^0.0.17",
+    "@gershy/util-phrasing": "^0.0.18",
+    "@gershy/util-slash-escape": "^0.0.14",
     "@aws-sdk/client-lambda": "^3.1045.0",
     "jszip": "^3.10.1"
   },
