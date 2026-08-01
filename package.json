@@ -1,6 +1,6 @@
 {
   "name": "@gershy/lilac-lambda",
-  "version": "0.0.27",
+  "version": "0.0.28",
   "author": "Gershom Maes",
   "description": "Lilac lambda function flower",
   "keywords": [],
@@ -31,7 +31,7 @@
     "@gershy/script-bundle": "^0.0.17",
     "@gershy/util-codec-parse": "^0.0.20",
     "@gershy/util-hash": "^0.0.25",
-    "@gershy/util-jsfn-encode": "^0.0.17",
+    "@gershy/util-jsfn-encode": "^0.0.18",
     "@gershy/util-phrasing": "^0.0.18",
     "@gershy/util-slash-escape": "^0.0.14",
     "@aws-sdk/client-lambda": "^3.1045.0",
