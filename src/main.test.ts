@@ -209,14 +209,14 @@ entry({ name: 'lilacLambda', codec, inp: { reg: '^', effort: 0 }, fn: async (log
       logger.log({ $$: 'launch' });
       
       const seedBank = new SeedBank({
-        MyLambda: { real: MyLambda, test: MyLambda }
+        MyLambda: { real: MyLambda, fake: MyLambda }
       });
       
       const garden = new Garden({
         term: 'hi',
         infraFact: fact.kid([ 'repo', 'terraform' ]),
-        patioFact: tempFact.kid([ '@gershy' ]),
-        shedFact: fact.kid([ 'repo', 'patio' ]),
+        patioFact: fact.kid([ 'repo', 'patio' ]),
+        shedFact: tempFact.kid([ '@gershy' ]),
         logger,
         debug: false,
         pfx: 'lilaclambdatest',
@@ -246,7 +246,7 @@ entry({ name: 'lilacLambda', codec, inp: { reg: '^', effort: 0 }, fn: async (log
       try {
         
         // TODO: real/fake -> natural/plastic
-        await garden.grow({ type: 'real', soil });
+        await garden.grow(soil);
         
         const lambdaClient = new LambdaClient({
           region: 'ca-central-1',

@@ -1,18 +1,19 @@
 import '@gershy/clearing';
-import { type AwsRegionTerm, type Garden, type ServiceMap, Flower, PetalTerraform, Soil } from '@gershy/lilac';
-import Logger                                         from '@gershy/logger';
-import { Network }                                    from '@gershy/lilac-network';
-import slashEscape                                    from '@gershy/util-slash-escape';
-import jsfnEncode, { type Jsfn, type JsImport }       from '@gershy/util-jsfn-encode';
-import scriptBundle                                   from '@gershy/script-bundle';
-import { rootFact }                                   from '@gershy/disk';
-import JsZip                                          from 'jszip';
-import hash                                           from '@gershy/util-hash';
-import phrasing                                       from '@gershy/util-phrasing';
-import type { Codec }                                 from '@gershy/util-codec-parse';
-import * as aws                                       from './util/aws.ts';
-import * as tf                                        from './util/terraform.ts';
-import * as awsTf                                     from './util/awsTerraform.ts';
+import { type AwsRegionTerm, type Garden, type ServiceMap, type Soil } from '@gershy/lilac';
+import { Flower, PetalTerraform }                 from '@gershy/lilac';
+import Logger                                     from '@gershy/logger';
+import { Network }                                from '@gershy/lilac-network';
+import slashEscape                                from '@gershy/util-slash-escape';
+import jsfnEncode, { type Jsfn, type JsImport }   from '@gershy/util-jsfn-encode';
+import scriptBundle                               from '@gershy/script-bundle';
+import { rootFact }                               from '@gershy/disk';
+import JsZip                                      from 'jszip';
+import hash                                       from '@gershy/util-hash';
+import phrasing                                   from '@gershy/util-phrasing';
+import type { Codec }                             from '@gershy/util-codec-parse';
+import * as aws                                   from './util/aws.ts';
+import * as tf                                    from './util/terraform.ts';
+import * as awsTf                                 from './util/awsTerraform.ts';
 
 // TODO: The LambdaShape only includes *native* req/res; a codec transforms the native req into a
 // shape that is more convenient for implementors - but there are two aspects to this: the 1st is
@@ -76,7 +77,7 @@ export abstract class LambdaBase<
   protected codec:     Cdc;
   protected baseUrl:   string;
   protected launchFn:  null | ((ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, localData: LocalData }) => LaunchData);
-  protected invokeFn:         ((ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, launchData: LaunchData, shapeData: Pick<Shape, 'ctx' | 'req'>, args: Codec.Out<Cdc> }) => Res);
+  protected invokeFn:         ((ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, launchData: LaunchData, shapeData: Pick<Shape, 'ctx' | 'req'>, args: Codec.Out<Cdc> }) => Promise<Res> | Res);
   protected env:       Env;
   
   constructor(args: {
@@ -86,11 +87,11 @@ export abstract class LambdaBase<
     name:       string,
     memoryMb?:  number,
     network?:   Network,
-    localData?: ((lambda?: LambdaBase<any, any, any, any, any, any>) => Promise<LocalData>) | Promise<LocalData> | LocalData;
+    localData?: ((lambda: LambdaBase<any, any, any, any, any, any>) => Promise<LocalData> | LocalData) | Promise<LocalData> | LocalData;
     codec?:     Cdc,
     baseUrl:    string,
     launchFn?:  (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, localData: LocalData }) => LaunchData,
-    invokeFn:   (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, shapeData: Pick<Shape, 'ctx' | 'req'>, launchData: LaunchData, args: Codec.Out<Cdc> }) => Res,
+    invokeFn:   (ctx: { debug: boolean, logger: Logger, jsfnImport: (fp: string) => any, shapeData: Pick<Shape, 'ctx' | 'req'>, launchData: LaunchData, args: Codec.Out<Cdc> }) => Promise<Res> | Res,
     env?:       Env
     
   }) {
@@ -116,6 +117,8 @@ export abstract class LambdaBase<
     this.env       = args.env ?? ({} as any);
     
   }
+  
+  public getFlowerId() { return null; } // Consider setting this if we want to invoke lambdas via client
   
   public getRegion() { return this.region; }
   public getName() { return this.name; }
@@ -150,9 +153,7 @@ export abstract class LambdaBase<
     
   }) => Promise<Shape['res']>;
   
-  public getPrincipalServices() {
-    return [ 'lambda.amazonaws.com' ];
-  }
+  public getPrincipalServices() { return [ 'lambda.amazonaws.com' ]; }
   
   public async getScript(args: { lang: 'ts' | 'js' }) {
     
@@ -402,10 +403,10 @@ export abstract class LambdaBase<
       
       // Set up lambda-scoped globals
       `const lilacGlobal = JSON.parse(process.env.${phrasing('camel->snake', 'gershyLilac')} ?? '{}');`,
-      `process[Symbol.for('@gershy/lilac/serviceMap')] = lilacGlobal.serviceMap ?? {};        `,
+      `process[Symbol.for('@gershy/lilac/garden')] = lilacGlobal.garden ?? {};                `,
       
       `const codec = ${jsfn.codec.code};                                                      `,
-      `const localData = ${jsfn.localData.code};                                                   `,
+      `const localData = ${jsfn.localData.code};                                              `,
       `const launchFn = ${jsfn.launchFn.code};                                                `,
       `const invokeFn = ${jsfn.invokeFn.code};                                                `,
       `const invokeWrapper = ${jsfn.invokeWrapper.code};                                      `,
@@ -438,12 +439,7 @@ export abstract class LambdaBase<
     const fileFact = rootFact.kid([ this.baseUrl.slice('file:///'.length) ]);
     const dirFact = fileFact.par();
     
-    const packedCode = await scriptBundle({
-      debug: this.garden.debug,
-      platform: 'node/cjs',
-      script,
-      dirFact
-    });
+    const packedCode = await scriptBundle({ debug: this.garden.debug, platform: 'node/cjs', script, dirFact });
     
     const zippedCode = await (async () => {
       const jsZip = new JsZip();
@@ -453,23 +449,28 @@ export abstract class LambdaBase<
     
     // Note within the lambda's context there are 3 different options for the hash:
     // 1. Original typescript source code
-    // 2. Compiled javascript code (webpacked, includes dependencies and sourceMapping)
+    // 2. Compiled javascript code (webpacked bundle, including dependencies plus sourceMapping)
     // 3. Overall zip file containing javascript code somewhere within it
-    // The correct choice is the 3rd - for #1, changes to dependency code won't register as
-    // changes (lambda will not be updated). For #2, changes to zip structure won't register,
-    // e.g. adding a new file will not be captured. The only correct choice is #3!
-    // Consider that `JsZip` produces buffers representing zipped files with nondeterministic
-    // contents(!) causing hashes to change as code remains the same - using option #2 for now;
-    // at present this is safe as the zip file contains nothing other than the single js file!
+    // The correct choice is the 3rd - for #1, pure-dependency code changes don't register in the
+    // hash; the lambda script fails to update. For #2, changes to zip structure won't register,
+    // e.g. new file additions don't update the hash. The only correct choice is #3!
+    // TODO: `JsZip` produces buffers representing zipped files with nondeterministic contents(!)
+    // causing hashes to change as code remains the same - using option #2 for now; at present this
+    // is relatively safe as the zip file contains nothing other than the single js file - watch
+    // out for changes that effect zip file contents!!
     
     return { script, packedCode, zippedCode, hash: await hash(packedCode) };
     
   }
   
-  async cultivate(serviceMap: ServiceMap) {
+  async cultivate(serviceMap: ServiceMap.Full) {
     
     // Store a representation of the full service map terraform (may contain terraform references)
-    this.env[cl.merge]({ gershyLilac: { serviceMap } });
+    this.env[cl.merge]({ gershyLilac: { garden: {
+      pfx: this.garden.pfx,
+      debug: this.garden.debug,
+      serviceMap
+    }}});
     
   }
   
