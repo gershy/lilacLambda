@@ -4,7 +4,7 @@ import { LambdaBase } from './main.ts';
 import Logger from '@gershy/logger';
 import { Fact, rootFact, tempFact } from '@gershy/disk';
 import codecParse, { type Codec } from '@gershy/util-codec-parse';
-import { Garden, SeedBank, Soil } from '@gershy/lilac';
+import { Garden, Soil } from '@gershy/lilac';
 import { InvokeCommand, LambdaClient, ListFunctionsCommand } from '@aws-sdk/client-lambda';
 import type { Jsfn } from '@gershy/util-jsfn-encode';
 import { JsfnUtility } from './import.test.ts';
@@ -208,10 +208,7 @@ entry({ name: 'lilacLambda', codec, inp: { reg: '^', effort: 0 }, fn: async (log
       
       logger.log({ $$: 'launch' });
       
-      const seedBank = new SeedBank({
-        MyLambda: { real: MyLambda, fake: MyLambda }
-      });
-      
+      const seedBank = { MyLambda };
       const garden = new Garden({
         term: 'hi',
         infraFact: fact.kid([ 'repo', 'terraform' ]),
